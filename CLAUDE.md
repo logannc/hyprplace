@@ -62,6 +62,21 @@ forever to compile and nothing here needs it.
 reviewable steps and pause at decision points rather than running ahead — especially for
 anything that mutates the workspace, spawns processes, or commits.
 
+## Installing
+
+`./install.lua install | uninstall | status`, with `--dry-run` to preview. It handles
+three separable concerns -- the Lua modules, the `require()` block in `hyprland.lua`, and
+a CLI wrapper on PATH -- each skippable with `--no-plugin` / `--no-config` / `--no-bin`.
+Re-running converges; `uninstall` restores `hyprland.lua` byte for byte and keeps learned
+state unless `--purge`.
+
+Not a make target: it is reversible, touches the live config, and its delicate part
+(editing `hyprland.lua`) lives in `installer.lua` where it is unit tested.
+
+Note the CLI wrapper execs the *installed* copy, so `hyprplace` on PATH and the running
+plugin always agree. Running `./bin/hyprplace` from the repo uses repo modules instead --
+`./install.lua status` reports when the two have drifted.
+
 ## Environment facts
 
 - Hyprland **0.56.2** (`efb50993`), configured in **Lua**, not hyprlang.

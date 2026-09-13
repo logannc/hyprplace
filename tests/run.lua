@@ -991,6 +991,78 @@ do
     eq(CLI.show_key(nil), "(none)", "nil key")
 end
 
+-- ------------------------------------------------------------------------ installer
+
+local Installer = require("hyprplace.installer")
+
+group("installer block editing")
+do
+    local original = '-- my config\nrequire("monitors")\nrequire("binds")\n'
+
+    ok(not Installer.has_block(original), "clean config has no block")
+    ok(not Installer.has_block(""), "empty config has no block")
+
+    local wired, changed = Installer.upsert_block(original)
+    ok(changed, "wiring reports a change")
+    ok(Installer.has_block(wired), "block is present afterwards")
+    ok(wired:find('require("hyprplace").setup({})', 1, true) ~= nil, "the call is there")
+    ok(wired:sub(1, #original) == original, "existing content is untouched at the front")
+
+    local again, changed2 = Installer.upsert_block(wired)
+    ok(not changed2, "re-wiring reports no change")
+    eq(again, wired, "and is byte-identical -- idempotent")
+
+    -- The round trip that matters: uninstall must give back exactly what we found.
+    eq(Installer.remove_block(wired), original, "removal restores the original byte for byte")
+    eq(Installer.remove_block(original), original, "removing an absent block changes nothing")
+end
+
+group("installer handles awkward files")
+do
+    local no_newline = 'require("binds")'
+    local wired = Installer.upsert_block(no_newline)
+    ok(Installer.has_block(wired), "a file with no trailing newline still gets wired")
+    eq(Installer.remove_block(wired), no_newline .. "\n",
+        "and unwiring yields the content with a newline")
+
+    eq(Installer.remove_block(Installer.upsert_block("")), "", "empty file round trips to empty")
+
+    -- A block someone edited by hand, or one written by an older version, is replaced
+    -- rather than duplicated.
+    local stale = "-- top\n\n" .. Installer.BEGIN .. "\nrequire('hyprplace')\nprint('junk')\n"
+        .. Installer.END .. "\n"
+    local fixed, ch = Installer.upsert_block(stale)
+    ok(ch, "a stale block is reported as changed")
+    eq(select(2, fixed:gsub(Installer.BEGIN, "")), 1, "exactly one block afterwards")
+    ok(fixed:find(Installer.CALL, 1, true) ~= nil, "with the correct call")
+    ok(not fixed:find("junk", 1, true), "and the hand-edited contents gone")
+end
+
+group("installer shell quoting")
+do
+    eq(Installer.shell_quote("/plain/path"), "'/plain/path'", "plain path")
+    eq(Installer.shell_quote("has space"), "'has space'", "spaces")
+    eq(Installer.shell_quote("it's"), [['it'\''s']], "embedded single quote is escaped")
+end
+
+group("installer module list matches the Makefile")
+do
+    -- Two lists of the same files will drift; this catches it.
+    local f = assert(io.open(ROOT .. "/Makefile", "r"))
+    local mk = f:read("a")
+    f:close()
+    local src_line = mk:match("SRC%s*:=%s*([^\n]+)")
+    ok(src_line ~= nil, "found SRC in the Makefile")
+
+    local in_make = {}
+    for name in src_line:gmatch("(%S+)") do in_make[name] = true end
+    for _, m in ipairs(Installer.MODULES) do
+        ok(in_make[m], m .. " is in the Makefile SRC list")
+        in_make[m] = nil
+    end
+    eq(next(in_make), nil, "the Makefile lists nothing the installer would miss")
+end
+
 -- --------------------------------------------------------------------------- report
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
