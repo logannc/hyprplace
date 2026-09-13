@@ -170,7 +170,7 @@ local function remember(w, ws_id, why)
 
     local distribution = Learn.distribution(w, windows, ws_id, key, key_fn(windows))
 
-    DB.observe(M._state, key, distribution, os.time(), M._cfg.max_slots)
+    DB.observe(M._state, key, distribution, os.time())
     log("learned (%s) %q -> %d window(s)", why, key, #distribution)
     schedule_save()
 end

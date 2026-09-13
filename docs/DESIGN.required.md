@@ -80,6 +80,10 @@ workspaces occupied by every live window sharing the key, duplicates included. S
 Firefox windows across 2,3,3,4,4,32,1 record all seven, because three of them genuinely
 belong on workspace 3 and a de-duplicated set would place only one there.
 
+The list is uncapped. A bound can only ever lose a window's home, and an earlier cap of
+eight was hit by an ordinary session with nine Firefox windows. One integer per window
+costs nothing; an implausible number of windows costs a slightly larger file.
+
 It is a snapshot, not an accumulation. Each learning event re-observes the whole
 distribution and replaces the record. Accumulating one observation at a time could not
 represent multiplicity, and summing counts across events would let a workspace you

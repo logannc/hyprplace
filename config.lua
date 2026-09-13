@@ -16,18 +16,6 @@ function M.defaults()
         -- Entries not seen within this many days are dropped when the DB loads.
         ttl_days = 90,
 
-        -- Most workspaces remembered per identity key (multi-window apps).
-        --
-        -- Generous on purpose. A live session had nine Firefox windows, and the old
-        -- cap of 8 silently dropped one -- specifically the highest workspace id,
-        -- because the distribution is stored sorted and truncated from the tail. Under
-        -- a per-monitor workspace scheme like hyprsplit's blocks (1-10, 11-20, 21-30,
-        -- ...) that is not a neutral choice: it discards the later monitors first.
-        --
-        -- The cap only exists to bound state growth, so it should sit far above any
-        -- plausible window count rather than anywhere near it.
-        max_slots = 32,
-
         -- Lua patterns matched against class:lower(). Matching windows are never
         -- remembered and never placed.
         ignore_classes = {

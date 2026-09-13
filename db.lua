@@ -149,58 +149,24 @@ end
 --- Stored sorted, so the ordering is stable and does not depend on window enumeration
 --- order. Which of several identical windows lands where is arbitrary anyway -- we
 --- cannot tell them apart, which is the whole reason multiplicity is needed.
+---
+--- Deliberately uncapped. An earlier version bounded the list, which could only ever
+--- lose a window's home, and the bound was hit by an ordinary session with nine Firefox
+--- windows. One integer per window is nothing; a user with an implausible number of
+--- windows costs us a slightly larger file and nothing else.
 ---@param state table
 ---@param key string
 ---@param workspaces integer[]
 ---@param now integer
----@param max_slots integer
-function M.observe(state, key, workspaces, now, max_slots)
+function M.observe(state, key, workspaces, now)
     if not key or not workspaces or #workspaces == 0 then
         return
     end
-    local cap = max_slots or 32
     local sorted = {}
     for _, id in ipairs(workspaces) do
         sorted[#sorted + 1] = id
     end
     table.sort(sorted)
-
-    if #sorted > cap then
-        -- The cap is a safety valve against pathological growth, not a shaping rule, so
-        -- when it trips it must drop the *least* useful slots. Trimming the sorted tail
-        -- would drop the highest workspace ids, which under a per-monitor scheme like
-        -- hyprsplit's blocks means discarding whole monitors -- an arbitrary choice
-        -- masquerading as an ordering.
-        --
-        -- Keep by descending frequency instead: the workspaces hosting the most windows
-        -- survive, which preserves the most placements. Ties break on workspace id for
-        -- determinism.
-        local freq, order = {}, {}
-        for _, id in ipairs(sorted) do
-            if not freq[id] then
-                freq[id] = 0
-                order[#order + 1] = id
-            end
-            freq[id] = freq[id] + 1
-        end
-        table.sort(order, function(a, b)
-            if freq[a] ~= freq[b] then
-                return freq[a] > freq[b]
-            end
-            return a < b
-        end)
-
-        local kept = {}
-        for _, id in ipairs(order) do
-            for _ = 1, freq[id] do
-                if #kept >= cap then break end
-                kept[#kept + 1] = id
-            end
-            if #kept >= cap then break end
-        end
-        table.sort(kept)
-        sorted = kept
-    end
 
     local e = state.entries[key]
     if not e then

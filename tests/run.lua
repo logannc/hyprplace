@@ -44,7 +44,8 @@ do
     local merged = Config.build({ ttl_days = 5, debug = true })
     eq(merged.ttl_days, 5, "user override wins")
     eq(merged.debug, true, "user override applies to booleans")
-    eq(merged.max_slots, d.max_slots, "unspecified keys keep defaults")
+    eq(merged.ttl_days ~= nil and merged.save_debounce_ms, d.save_debounce_ms,
+        "unspecified keys keep defaults")
 
     ok(Config.matches("Kitty", { "^kitty$" }), "matches case-insensitively")
     ok(not Config.matches("kitty", { "^alacritty$" }), "non-match returns false")
@@ -145,8 +146,8 @@ local DB = require("hyprplace.db")
 group("db.serialize/deserialize")
 do
     local s = DB.empty()
-    DB.observe(s, "firefox", { 3 }, 1000, 8)
-    DB.observe(s, "kitty\0kitty btop", { 21 }, 1001, 8)
+    DB.observe(s, "firefox", { 3 }, 1000)
+    DB.observe(s, "kitty\0kitty btop", { 21 }, 1001)
     local round = DB.deserialize(DB.serialize(s))
     eq(round.version, DB.VERSION, "version survives")
     eq(round.entries["firefox"].workspaces[1], 3, "workspace survives")
@@ -162,23 +163,10 @@ do
     eq(next(DB.deserialize("os.exit(1)").entries), nil, "no ambient access in the sandbox")
 end
 
-group("max_slots is above realistic window counts")
-do
-    -- Nine Firefox windows in a live session were truncated to eight by the old cap,
-    -- dropping workspace 32 -- the highest id, which under hyprsplit means the last
-    -- monitor.
-    local cfg = Config.build({})
-    local nine = { 1, 2, 3, 3, 3, 4, 4, 5, 32 }
-    local s = DB.empty()
-    DB.observe(s, "firefox", nine, 100, cfg.max_slots)
-    eq(#s.entries["firefox"].workspaces, 9, "all nine windows survive the default cap")
-    eq(s.entries["firefox"].workspaces[9], 32, "including the one on the last monitor")
-end
-
 group("db.observe")
 do
     local s = DB.empty()
-    DB.observe(s, "k", { 4, 2, 2 }, 100, 8)
+    DB.observe(s, "k", { 4, 2, 2 }, 100)
     eq(#s.entries["k"].workspaces, 3, "duplicates are kept -- multiplicity matters")
     eq(s.entries["k"].workspaces[1], 2, "stored sorted for stable ordering")
     eq(s.entries["k"].workspaces[3], 4, "sorted ascending")
@@ -186,47 +174,25 @@ do
 
     -- A snapshot replaces; it does not accumulate. Otherwise a workspace you reopen on
     -- constantly would crowd out the others.
-    DB.observe(s, "k", { 9 }, 101, 8)
+    DB.observe(s, "k", { 9 }, 101)
     eq(#s.entries["k"].workspaces, 1, "a later observation replaces the earlier one")
     eq(s.entries["k"].workspaces[1], 9, "with the newly observed distribution")
 
+    -- Deliberately uncapped: a bound could only ever lose a window's home, and an
+    -- ordinary session with nine Firefox windows already hit the old one.
     local big = {}
-    for n = 1, 20 do big[n] = n end
-    DB.observe(s, "k", big, 102, 5)
-    eq(#s.entries["k"].workspaces, 5, "capped at max_slots")
+    for n = 1, 40 do big[n] = n end
+    DB.observe(s, "k", big, 102)
+    eq(#s.entries["k"].workspaces, 40, "no cap -- every window keeps its home")
 
-    DB.observe(s, "empty", {}, 103, 8)
+    DB.observe(s, "empty", {}, 103)
     eq(s.entries["empty"], nil, "an empty observation records nothing")
-end
-
-group("db.observe truncates by usefulness, not by ordering")
-do
-    -- Trimming the sorted tail would drop the highest workspace ids, which under
-    -- hyprsplit's per-monitor blocks means discarding whole monitors.
-    local s = DB.empty()
-    DB.observe(s, "k", { 1, 3, 3, 3, 40, 40 }, 100, 4)
-    local got = {}
-    for _, id in ipairs(s.entries["k"].workspaces) do got[#got + 1] = tostring(id) end
-    eq(table.concat(got, ","), "3,3,3,40",
-        "keeps the busiest workspaces; the lone window on 1 loses, not the high id 40")
-
-    -- Ties break on workspace id so the result is deterministic.
-    local s2 = DB.empty()
-    DB.observe(s2, "k", { 9, 2, 5 }, 100, 2)
-    local got2 = {}
-    for _, id in ipairs(s2.entries["k"].workspaces) do got2[#got2 + 1] = tostring(id) end
-    eq(table.concat(got2, ","), "2,5", "equal frequencies break on lowest id")
-
-    -- Stored sorted regardless of the order truncation considered them in.
-    local s3 = DB.empty()
-    DB.observe(s3, "k", { 40, 40, 1 }, 100, 3)
-    eq(s3.entries["k"].workspaces[1], 1, "output is still sorted ascending")
 end
 
 group("db.touch")
 do
     local s = DB.empty()
-    DB.observe(s, "k", { 5, 3 }, 101, 8)   -- sorted to {3, 5}
+    DB.observe(s, "k", { 5, 3 }, 101)   -- sorted to {3, 5}
     ok(DB.touch(s, "k", 999), "touch reports it found the entry")
     eq(s.entries["k"].seen, 999, "seen is refreshed")
     eq(s.entries["k"].workspaces[1], 3, "slot order is not disturbed")
@@ -238,7 +204,7 @@ group("db.prune")
 do
     local now = 1000000
     local s = DB.empty()
-    DB.observe(s, "fresh", { 1 }, now, 8)
+    DB.observe(s, "fresh", { 1 }, now)
     DB.observe(s, "stale", { 1 }, now - (91 * 86400), 8)
     local _, dropped = DB.prune(s, 90, now)
     eq(dropped, 1, "one entry expired")
@@ -246,7 +212,7 @@ do
     eq(s.entries["stale"], nil, "stale entry dropped")
 
     local s2 = DB.empty()
-    DB.observe(s2, "old", { 1 }, 0, 8)
+    DB.observe(s2, "old", { 1 }, 0)
     local _, d2 = DB.prune(s2, 0, now)
     eq(d2, 0, "ttl of 0 disables expiry")
 end
@@ -255,7 +221,7 @@ group("db.save/load round trip")
 do
     local path = os.tmpname()
     local s = DB.empty()
-    DB.observe(s, "firefox", { 7 }, 12345, 8)
+    DB.observe(s, "firefox", { 7 }, 12345)
     local saved, err = DB.save(path, s)
     ok(saved, "save succeeded (" .. tostring(err) .. ")")
     eq(DB.load(path).entries["firefox"].workspaces[1], 7, "loaded what we saved")
@@ -407,7 +373,7 @@ do
     local other = support.window({ class = "firefox", address = "0xb", workspace = 5 })
     local hp, h = fresh({ w, other })
     h.echo_move = true
-    DB.observe(hp.state(), "firefox", { 5, 3 }, 1000, 8)   -- sorted to {3, 5}
+    DB.observe(hp.state(), "firefox", { 5, 3 }, 1000)   -- sorted to {3, 5}
 
     h.handlers["window.open_early"](w)
     eq(h.dispatched[1].args.workspace, 3, "placed on the first free remembered slot")
@@ -421,7 +387,7 @@ group("placement refreshes recency")
 do
     local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
     local hp, h = fresh({ w })
-    DB.observe(hp.state(), "firefox", { 3 }, 1000, 8)
+    DB.observe(hp.state(), "firefox", { 3 }, 1000)
     h.handlers["window.open_early"](w)
     ok(hp.state().entries["firefox"].seen > 1000,
         "an app you keep reopening does not expire, even if never moved")
@@ -429,7 +395,7 @@ do
     -- Also refreshed when the window is already where it belongs and no move is needed.
     local w2 = support.window({ class = "discord", address = "0xb", workspace = 3 })
     local hp2, h2 = fresh({ w2 })
-    DB.observe(hp2.state(), "discord", { 3 }, 1000, 8)
+    DB.observe(hp2.state(), "discord", { 3 }, 1000)
     h2.handlers["window.open_early"](w2)
     eq(#h2.dispatched, 0, "no move needed")
     ok(hp2.state().entries["discord"].seen > 1000, "but recency still refreshed")
@@ -513,7 +479,7 @@ do
     -- layout -- and then place windows there next boot.
     local w = support.window({ class = "firefox", address = "0xa", workspace = 1 })
     local hp, h = fresh({ w })
-    DB.observe(hp.state(), "firefox", { 3 }, 1000, 8)
+    DB.observe(hp.state(), "firefox", { 3 }, 1000)
 
     h.handlers["window.move_to_workspace"](w, { id = 1 })
     eq(hp.state().entries["firefox"].workspaces[1], 3,
@@ -530,7 +496,7 @@ do
     -- the entire point of the plugin.
     local w2 = support.window({ class = "discord", address = "0xb", workspace = 1 })
     local hp2, h2 = fresh({ w2 })
-    DB.observe(hp2.state(), "discord", { 31 }, 1000, 8)
+    DB.observe(hp2.state(), "discord", { 31 }, 1000)
     h2.handlers["window.open_early"](w2)
     eq(h2.dispatched[1].args.workspace, 31, "placement still happens during startup")
 end
@@ -759,7 +725,7 @@ do
     local now = 1000000
     local state = DB.empty()
     DB.observe(state, "old", { 1 }, now - (10 * 86400), 8)
-    DB.observe(state, "new", { 2 }, now, 8)
+    DB.observe(state, "new", { 2 }, now)
     local rows = CLI.db_rows(state, cfg, now)
     eq(#rows, 2, "one row per entry")
     eq(rows[1].key, "new", "newest first")
@@ -866,7 +832,7 @@ do
     local now = 1000000
     local cfg = Config.build({ ttl_days = 90 })
     local state = DB.empty()
-    DB.observe(state, "fresh", { 1 }, now - 86400, 8)
+    DB.observe(state, "fresh", { 1 }, now - 86400)
     DB.observe(state, "stale", { 1 }, now - (100 * 86400), 8)
     local rows = CLI.expired_rows(state, cfg, now)
     eq(#rows, 1, "one entry expired")
@@ -907,7 +873,7 @@ do
     Identity.read_cmdline = function() return nil end
     local cfg = Config.build({})
     local state = DB.empty()
-    DB.observe(state, "firefox", { 3 }, os.time(), cfg.max_slots)
+    DB.observe(state, "firefox", { 3 }, os.time())
 
     local w = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 9 })
     local windows = { w }
@@ -920,7 +886,7 @@ do
 
     -- And the plugin acts on exactly that verdict.
     local hp, h = fresh(windows)
-    DB.observe(hp.state(), "firefox", { 3 }, os.time(), cfg.max_slots)
+    DB.observe(hp.state(), "firefox", { 3 }, os.time())
     h.handlers["window.open_early"](w)
     eq(h.dispatched[1].args.workspace, direct.target,
         "the plugin dispatches the target the tools predicted")
