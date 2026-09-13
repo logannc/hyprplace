@@ -199,6 +199,30 @@ do
     eq(s.entries["empty"], nil, "an empty observation records nothing")
 end
 
+group("db.observe truncates by usefulness, not by ordering")
+do
+    -- Trimming the sorted tail would drop the highest workspace ids, which under
+    -- hyprsplit's per-monitor blocks means discarding whole monitors.
+    local s = DB.empty()
+    DB.observe(s, "k", { 1, 3, 3, 3, 40, 40 }, 100, 4)
+    local got = {}
+    for _, id in ipairs(s.entries["k"].workspaces) do got[#got + 1] = tostring(id) end
+    eq(table.concat(got, ","), "3,3,3,40",
+        "keeps the busiest workspaces; the lone window on 1 loses, not the high id 40")
+
+    -- Ties break on workspace id so the result is deterministic.
+    local s2 = DB.empty()
+    DB.observe(s2, "k", { 9, 2, 5 }, 100, 2)
+    local got2 = {}
+    for _, id in ipairs(s2.entries["k"].workspaces) do got2[#got2 + 1] = tostring(id) end
+    eq(table.concat(got2, ","), "2,5", "equal frequencies break on lowest id")
+
+    -- Stored sorted regardless of the order truncation considered them in.
+    local s3 = DB.empty()
+    DB.observe(s3, "k", { 40, 40, 1 }, 100, 3)
+    eq(s3.entries["k"].workspaces[1], 1, "output is still sorted ascending")
+end
+
 group("db.touch")
 do
     local s = DB.empty()
