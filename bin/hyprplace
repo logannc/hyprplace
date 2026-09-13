@@ -11,6 +11,10 @@
 --   hyprplace prune            entries the TTL would drop (--apply to write)
 --   hyprplace watch            live feed of window changes and hyprplace verdicts
 --
+-- watch polls. It cannot observe a change that is reverted inside one interval, and it
+-- sees windows only after the compositor has placed them, never at window.open_early.
+-- For ground truth about what the plugin actually did, read its own log output.
+--
 --   --instance SIG   target another Hyprland instance (e.g. the test compositor)
 --   --runtime DIR    XDG_RUNTIME_DIR for that instance
 --   --db PATH        state file to read (default: config's db_path)
@@ -64,14 +68,15 @@ usage: hyprplace <command> [options]
   diff          where the learned state and the current layout disagree.
   prune         entries the TTL would drop today. Dry run unless --apply.
   watch         poll for window changes and print what hyprplace would do.
-                Ctrl-C to stop.
+                Ctrl-C to stop. Note a poller cannot see a change that is
+                undone within one interval.
 
 options:
   -i, --instance SIG   target another Hyprland instance
       --runtime DIR    XDG_RUNTIME_DIR for that instance
       --db PATH        state file to read
       --apply          prune only: actually write the pruned state
-      --interval SEC   watch only: poll interval (default 1)
+      --interval SEC   watch only: poll interval (default 0.25)
 
 Every command except `prune --apply` is read-only: they never dispatch to the compositor.
 ]])
@@ -201,7 +206,11 @@ local function nap(seconds)
 end
 
 function commands.watch(cfg, opts)
-    local interval = opts.interval or 1
+    -- Default well under human reaction time. A poller is blind to any change that is
+    -- undone within one interval: moving a window and moving it straight back looks
+    -- identical to nothing happening. At 1s that was easy to hit by hand. Polling costs
+    -- about a millisecond of CPU, so the interval can be short.
+    local interval = opts.interval or 0.25
     local state = DB.load(cfg.db_path)
     io.write(string.format("watching every %ss; state: %s\nCtrl-C to stop.\n\n",
         tostring(interval), cfg.db_path))
