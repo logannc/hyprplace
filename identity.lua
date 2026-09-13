@@ -48,9 +48,15 @@ end
 --- Strips wrapper commands (`uwsm app -- kitty btop` -> `kitty btop`), VAR=value
 --- prefixes, and leading directories. Returns nil when only the bare binary remains,
 --- since that adds nothing over the class.
+---
+--- Flags are dropped unless allowlisted for that binary by `cfg.keep_flags`. This is
+--- the difference between a usable fingerprint and a useless one: Steam's argv is 800+
+--- characters and carries `-steampid=`, `-buildid=` and `-startcount=`, all of which
+--- change every launch. Dropping flags leaves the stable `steamwebhelper`.
 ---@param argv string[]|nil
+---@param cfg table|nil
 ---@return string|nil
-function M.normalize_cmdline(argv)
+function M.normalize_cmdline(argv, cfg)
     if not argv or #argv == 0 then
         return nil
     end
@@ -71,11 +77,38 @@ function M.normalize_cmdline(argv)
         end
     end
 
-    if #out <= 1 then
+    if #out == 0 then
+        return nil
+    end
+
+    local binary = out[1]
+    local allow = cfg and cfg.keep_flags and cfg.keep_flags[binary]
+    local kept = { binary }
+    for n = 2, #out do
+        local tok = out[n]
+        if tok:sub(1, 1) ~= "-" then
+            kept[#kept + 1] = tok
+        elseif allow then
+            for _, pat in ipairs(allow) do
+                if tok:match(pat) then
+                    kept[#kept + 1] = tok
+                    break
+                end
+            end
+        end
+    end
+
+    if #kept <= 1 then
         -- Bare binary only: `kitty` tells us nothing `class` did not.
         return nil
     end
-    return table.concat(out, " ")
+
+    local joined = table.concat(kept, " ")
+    local cap = cfg and cfg.max_cmdline_len
+    if cap and cap > 0 and #joined > cap then
+        joined = joined:sub(1, cap)
+    end
+    return joined
 end
 
 --- How many of `windows` share this pid?
@@ -98,8 +131,9 @@ end
 --- unique enough for its cmdline to be meaningful.
 ---@param w table
 ---@param windows table[]
+---@param cfg table|nil
 ---@return string|nil key, string tier
-function M.key_for(w, windows)
+function M.key_for(w, windows, cfg)
     if not w then
         return nil, "none"
     end
@@ -112,7 +146,7 @@ function M.key_for(w, windows)
     end
 
     if w.pid and M.pid_window_count(windows, w.pid) == 1 then
-        local cmd = M.normalize_cmdline(M.read_cmdline(w.pid))
+        local cmd = M.normalize_cmdline(M.read_cmdline(w.pid), cfg)
         if cmd then
             return class .. "\0" .. cmd, "cmdline"
         end
@@ -124,9 +158,10 @@ end
 --- Does this window have a distinguishing cmdline? Used by `require_cmdline`.
 ---@param w table
 ---@param windows table[]
+---@param cfg table|nil
 ---@return boolean
-function M.has_cmdline_identity(w, windows)
-    local _, tier = M.key_for(w, windows)
+function M.has_cmdline_identity(w, windows, cfg)
+    local _, tier = M.key_for(w, windows, cfg)
     return tier == "cmdline"
 end
 

@@ -72,7 +72,7 @@ end
 
 local function key_fn(windows)
     return function(w)
-        local key = Identity.key_for(w, windows)
+        local key = Identity.key_for(w, windows, M._cfg)
         return key
     end
 end
@@ -117,7 +117,7 @@ local function place(w)
         return
     end
 
-    local key = Identity.key_for(w, windows)
+    local key = Identity.key_for(w, windows, M._cfg)
     local entry = DB.lookup(M._state, key)
     if not entry then
         log("no record for %q", tostring(key))
@@ -166,7 +166,7 @@ local function remember(w, ws_id, why)
     if not tracked(w, windows) then
         return
     end
-    local key = Identity.key_for(w, windows)
+    local key = Identity.key_for(w, windows, M._cfg)
     if not key then
         return
     end

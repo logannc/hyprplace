@@ -52,7 +52,7 @@ function M.decide(w, windows, cfg)
         return false, M.IGNORED
     end
     if Config.matches(class, cfg.require_cmdline)
-        and not Identity.has_cmdline_identity(w, windows) then
+        and not Identity.has_cmdline_identity(w, windows, cfg) then
         return false, M.NEEDS_CMDLINE
     end
     return true, M.OK

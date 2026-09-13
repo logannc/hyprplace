@@ -72,6 +72,39 @@ do
         "wrapper around a bare binary is still nothing")
 end
 
+group("identity flag handling")
+do
+    -- Real Steam argv: 800+ chars, and -steampid/-buildid/-startcount all change on
+    -- every launch, so a key built from them could never match a stored record.
+    local steam = { "/home/u/.local/share/Steam/ubuntu12_32/steamwebhelper",
+        "-nocrashdialog", "-steampid=3416", "-buildid=1788652215", "-startcount=0",
+        "--enable-features=Foo" }
+    eq(Identity.normalize_cmdline(steam), nil,
+        "an all-flags argv yields no fingerprint, so the class tier is used")
+
+    eq(Identity.normalize_cmdline({ "kitty", "--working-directory=/home/u/x" }), nil,
+        "flags are dropped by default")
+    eq(Identity.normalize_cmdline({ "kitty", "btop" }), "kitty btop",
+        "positional arguments are always kept")
+    eq(Identity.normalize_cmdline({ "kitty", "--hold", "btop" }), "kitty btop",
+        "flags dropped, positionals kept, in one argv")
+
+    local cfg = { keep_flags = { kitty = { "^%-%-working%-directory=" } } }
+    eq(Identity.normalize_cmdline({ "kitty", "--working-directory=/home/u/x" }, cfg),
+        "kitty --working-directory=/home/u/x",
+        "an allowlisted flag is kept for that binary")
+    eq(Identity.normalize_cmdline({ "kitty", "--hold", "--working-directory=/x" }, cfg),
+        "kitty --working-directory=/x",
+        "only the allowlisted flag is kept")
+    eq(Identity.normalize_cmdline({ "alacritty", "--working-directory=/x" }, cfg), nil,
+        "the allowlist is per binary, not global")
+
+    local many = { "app" }
+    for n = 1, 60 do many[#many + 1] = "argument" .. n end
+    local capped = Identity.normalize_cmdline(many, { max_cmdline_len = 40 })
+    eq(#capped, 40, "long fingerprints are capped")
+end
+
 group("identity.key_for")
 do
     local real = Identity.read_cmdline

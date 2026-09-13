@@ -34,6 +34,23 @@ function M.defaults()
         --   require_cmdline = { "^kitty$", "^alacritty$", "^foot$" },
         require_cmdline = {},
 
+        -- Flags are dropped from the cmdline fingerprint by default, because that is
+        -- where volatile junk lives: Steam's argv carries -steampid=, -buildid= and
+        -- -startcount=, all of which change on every launch, so a key built from them
+        -- can never match again.
+        --
+        -- Positional arguments are always kept -- `kitty btop` keeps `btop`. This table
+        -- allowlists flags worth keeping, per binary basename, as Lua patterns:
+        --
+        --   keep_flags = { kitty = { "^%-%-working%-directory=" } },
+        --
+        -- Empty by default; teaching hyprplace about specific binaries is future work.
+        keep_flags = {},
+
+        -- Backstop on fingerprint length, in case some binary has a great many
+        -- positional arguments.
+        max_cmdline_len = 120,
+
         -- Milliseconds after a monitor event during which moves are not learned from.
         -- A KVM swap or hotplug reflows whole workspaces; that is not user intent.
         monitor_settle_ms = 2000,

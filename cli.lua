@@ -73,7 +73,7 @@ function M.fingerprint_rows(windows, cfg)
     local rows = {}
     for _, w in ipairs(windows) do
         local tracked, reason = Policy.decide(w, windows, cfg)
-        local key, tier = Identity.key_for(w, windows)
+        local key, tier = Identity.key_for(w, windows, cfg)
         rows[#rows + 1] = {
             address = w.address,
             class   = Policy.class_of(w) or "(none)",
@@ -100,7 +100,7 @@ function M.plan_rows(windows, state, cfg)
     local rows = {}
     for _, w in ipairs(windows) do
         local tracked, reason = Policy.decide(w, windows, cfg)
-        local key = Identity.key_for(w, windows)
+        local key = Identity.key_for(w, windows, cfg)
         local row = {
             address = w.address,
             class   = Policy.class_of(w) or "(none)",
@@ -118,7 +118,7 @@ function M.plan_rows(windows, state, cfg)
                 row.detail  = "no record for this key"
             else
                 local occupied = Placement.occupied_workspaces(
-                    windows, key, w.address, function(o) return (Identity.key_for(o, windows)) end)
+                    windows, key, w.address, function(o) return (Identity.key_for(o, windows, cfg)) end)
                 local target = Placement.choose(entry, occupied)
                 row.remembered = entry.workspaces
                 if not target then

@@ -42,6 +42,20 @@ no distinguishing cmdline, while `kitty btop` does.
   than one global list, and whether "volatile" should be inferred (e.g. a window whose
   cmdline is just the bare binary) rather than configured.
 
+### Teaching hyprplace about a binary
+
+Flags are dropped from the cmdline fingerprint by default, and `keep_flags` allowlists
+the useful ones per binary. Choosing those patterns by hand is exactly the kind of thing
+a user should not have to do in a config file.
+
+- A `hyprplace teach <window>` flow that shows the argv, lets you pick which tokens are
+  identity, and writes the allowlist entry.
+- Related to the keybind escape hatch below: "this window is not being recognized" is the
+  moment the user wants to teach, and the keybind is how they say so.
+- Could the useful flags be inferred? A flag whose value differs between two runs of the
+  same binary is volatile by definition, so observing across restarts would find them
+  without being told.
+
 ### Configuration surface generally
 
 Both of the above imply a real config story: where user config lives, how it merges with
