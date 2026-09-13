@@ -7,6 +7,9 @@
 --   hyprplace fingerprint      what hyprplace sees, and what a close would record
 --   hyprplace plan             where each open window would be placed right now
 --   hyprplace db               current learned state, newest first
+--   hyprplace diff             where learned state and reality disagree
+--   hyprplace prune            entries the TTL would drop (--apply to write)
+--   hyprplace watch            live feed of window changes and hyprplace verdicts
 --
 --   --instance SIG   target another Hyprland instance (e.g. the test compositor)
 --   --runtime DIR    XDG_RUNTIME_DIR for that instance
@@ -38,6 +41,8 @@ local function parse_args(argv)
         if a == "--instance" or a == "-i" then i = i + 1; opts.instance = argv[i]
         elseif a == "--runtime"           then i = i + 1; opts.runtime  = argv[i]
         elseif a == "--db"                then i = i + 1; opts.db       = argv[i]
+        elseif a == "--apply"             then opts.apply = true
+        elseif a == "--interval"          then i = i + 1; opts.interval = tonumber(argv[i])
         elseif a == "-h" or a == "--help" then opts.help = true
         elseif not cmd                    then cmd = a
         else io.stderr:write("unknown argument: " .. a .. "\n"); os.exit(2)
@@ -56,13 +61,19 @@ usage: hyprplace <command> [options]
   plan          where each open window would be placed if it opened right now.
                 Reads the state file; writes nothing.
   db            current learned state, newest first.
+  diff          where the learned state and the current layout disagree.
+  prune         entries the TTL would drop today. Dry run unless --apply.
+  watch         poll for window changes and print what hyprplace would do.
+                Ctrl-C to stop.
 
 options:
   -i, --instance SIG   target another Hyprland instance
       --runtime DIR    XDG_RUNTIME_DIR for that instance
       --db PATH        state file to read
+      --apply          prune only: actually write the pruned state
+      --interval SEC   watch only: poll interval (default 1)
 
-These tools are read-only: they never dispatch to the compositor.
+Every command except `prune --apply` is read-only: they never dispatch to the compositor.
 ]])
 end
 
@@ -131,12 +142,91 @@ function commands.db(cfg, _)
     end
 end
 
+function commands.diff(cfg, opts)
+    local windows = windows_or_die(opts)
+    local state = DB.load(cfg.db_path)
+    local rows = CLI.diff_rows(windows, state, cfg)
+    io.write(string.format("state: %s\n\n", cfg.db_path))
+    local function show(list)
+        local out = {}
+        for _, id in ipairs(list or {}) do out[#out + 1] = tostring(id) end
+        return #out > 0 and table.concat(out, ",") or "-"
+    end
+    for _, r in ipairs(rows) do
+        io.write(string.format("%-10s %-44s remembered %-16s live %s\n",
+            r.status, CLI.show_key(r.key), show(r.remembered), show(r.actual)))
+    end
+end
+
+function commands.prune(cfg, opts)
+    local state = DB.load(cfg.db_path)
+    local rows = CLI.expired_rows(state, cfg, os.time())
+    if cfg.ttl_days <= 0 then
+        io.write("ttl is disabled (ttl_days = 0); nothing expires\n")
+        return
+    end
+    io.write(string.format("state: %s\nttl %d days\n\n", cfg.db_path, cfg.ttl_days))
+    if #rows == 0 then
+        io.write("nothing has expired\n")
+        return
+    end
+    for _, r in ipairs(rows) do
+        io.write(string.format("%-44s last seen %.1f days ago\n", CLI.show_key(r.key), r.age_days))
+    end
+    if not opts.apply then
+        io.write(string.format("\n%d entr%s would be dropped. Re-run with --apply to write.\n",
+            #rows, #rows == 1 and "y" or "ies"))
+        return
+    end
+    local _, dropped = DB.prune(state, cfg.ttl_days, os.time())
+    local written, err = DB.save(cfg.db_path, state)
+    if not written then die("could not write state: " .. tostring(err)) end
+    io.write(string.format("\ndropped %d entr%s\n", dropped, dropped == 1 and "y" or "ies"))
+end
+
+function commands.watch(cfg, opts)
+    local interval = opts.interval or 1
+    local state = DB.load(cfg.db_path)
+    io.write(string.format("watching every %ss; state: %s\nCtrl-C to stop.\n\n",
+        tostring(interval), cfg.db_path))
+
+    -- Polling rather than tailing the event socket: Lua has no AF_UNIX support and the
+    -- alternative would be a dependency on socat or python. The cost is latency, which
+    -- does not matter for an observational tool -- but note this sees windows only
+    -- *after* the compositor has placed them, not at window.open_early.
+    local previous = nil
+    while true do
+        local windows, err = CLI.load_windows(opts)
+        if not windows then die(err) end
+        local delta = CLI.window_delta(previous, windows)
+
+        for _, w in ipairs(delta.appeared) do
+            local rows = CLI.plan_rows({ w }, state, cfg)
+            local r = rows[1]
+            io.write(string.format("+ %-20s ws %-4s  %s: %s\n",
+                r.class, tostring(r.ws or "-"), r.outcome, r.detail))
+            io.write(string.format("    key %s\n", CLI.show_key(r.key)))
+        end
+        for _, w in ipairs(delta.vanished) do
+            io.write(string.format("- %-20s closed\n", w.class or "?"))
+        end
+        for _, m in ipairs(delta.moved) do
+            io.write(string.format("~ %-20s ws %s -> %s\n",
+                m.window.class or "?", tostring(m.from), tostring(m.to)))
+        end
+        io.flush()
+
+        previous = windows
+        os.execute("sleep " .. tostring(interval))
+    end
+end
+
 -- ------------------------------------------------------------------------------- main
 
 local cmd, opts = parse_args(arg)
 if opts.help or not cmd then
     usage()
-    os.exit(cmd and 0 or 2)
+    os.exit(opts.help and 0 or 2)
 end
 
 local handler = commands[cmd]

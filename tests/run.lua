@@ -775,6 +775,93 @@ do
     Identity.read_cmdline = real_read
 end
 
+group("cli.live_distribution")
+do
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+    local cfg = Config.build({ ignore_classes = { "^hyprland%-run$" } })
+    local wins = {
+        support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 4 }),
+        support.window({ class = "firefox", pid = 2, address = "0xb", workspace = 3 }),
+        support.window({ class = "firefox", pid = 3, address = "0xc", workspace = 3 }),
+        support.window({ class = "hyprland-run", pid = 4, address = "0xd", workspace = 1 }),
+    }
+    local dist = CLI.live_distribution(wins, cfg)
+    eq(#dist["firefox"], 3, "duplicates preserved")
+    eq(dist["firefox"][1], 3, "sorted ascending")
+    eq(dist["firefox"][3], 4, "sorted ascending")
+    eq(dist["hyprland-run"], nil, "ignored classes excluded")
+    Identity.read_cmdline = real
+end
+
+group("cli.diff_rows")
+do
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+    local cfg = Config.build({})
+    local state = DB.empty()
+    DB.observe(state, "firefox", { 3, 3 }, os.time(), 8)
+    DB.observe(state, "signal", { 33 }, os.time(), 8)
+    DB.observe(state, "discord", { 31 }, os.time(), 8)
+
+    local wins = {
+        support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 3 }),
+        support.window({ class = "firefox", pid = 2, address = "0xb", workspace = 3 }),
+        support.window({ class = "signal",  pid = 3, address = "0xc", workspace = 1 }),
+        support.window({ class = "steam",   pid = 4, address = "0xd", workspace = 22 }),
+    }
+    local by_key = {}
+    for _, r in ipairs(CLI.diff_rows(wins, state, cfg)) do by_key[r.key] = r end
+
+    eq(by_key["firefox"].status, "match", "identical distributions match")
+    eq(by_key["signal"].status, "differs", "signal is running somewhere unexpected")
+    eq(by_key["signal"].actual[1], 1, "reports where it actually is")
+    eq(by_key["signal"].remembered[1], 33, "and where it was remembered")
+    eq(by_key["steam"].status, "unlearned", "running but never recorded")
+    eq(by_key["discord"].status, "absent", "recorded but not running")
+
+    eq(CLI.diff_rows(wins, state, cfg)[1].status, "differs", "disagreements sort first")
+    Identity.read_cmdline = real
+end
+
+group("cli.expired_rows")
+do
+    local now = 1000000
+    local cfg = Config.build({ ttl_days = 90 })
+    local state = DB.empty()
+    DB.observe(state, "fresh", { 1 }, now - 86400, 8)
+    DB.observe(state, "stale", { 1 }, now - (100 * 86400), 8)
+    local rows = CLI.expired_rows(state, cfg, now)
+    eq(#rows, 1, "one entry expired")
+    eq(rows[1].key, "stale", "the stale one")
+    eq(#CLI.expired_rows(state, Config.build({ ttl_days = 0 }), now), 0,
+        "ttl disabled -> nothing expires")
+end
+
+group("cli.window_delta")
+do
+    local a = support.window({ class = "kitty", address = "0xa", workspace = 1 })
+    local b = support.window({ class = "firefox", address = "0xb", workspace = 2 })
+    local b_moved = support.window({ class = "firefox", address = "0xb", workspace = 5 })
+
+    local first = CLI.window_delta(nil, { a })
+    eq(#first.appeared, 0, "the first snapshot reports nothing as new")
+
+    local d = CLI.window_delta({ a, b }, { a, b_moved })
+    eq(#d.moved, 1, "detects a move")
+    eq(d.moved[1].from, 2, "from workspace")
+    eq(d.moved[1].to, 5, "to workspace")
+    eq(#d.appeared, 0, "no spurious appearances")
+
+    local d2 = CLI.window_delta({ a }, { a, b })
+    eq(#d2.appeared, 1, "detects a new window")
+    eq(d2.appeared[1].address, "0xb", "the right one")
+
+    local d3 = CLI.window_delta({ a, b }, { a })
+    eq(#d3.vanished, 1, "detects a closed window")
+    eq(d3.vanished[1].address, "0xb", "the right one")
+end
+
 group("cli.show_key")
 do
     eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")

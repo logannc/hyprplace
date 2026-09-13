@@ -117,6 +117,32 @@ loop. Constraints to respect if we go down this road:
 - Reading another process's `environ` or `cwd` is a privacy consideration even for the
   user's own processes — worth an explicit opt-in rather than default-on.
 
+### Session recovery: reopen what was open
+
+Today hyprplace places windows you launch. It could also notice what is *missing*.
+
+Give each entry an `active` flag recorded while the app is running. After a reboot you
+arrive at a session where several entries are marked active but have no corresponding
+process. That diff is a to-do list: these were open last time and are not now.
+
+What to do with the diff is the design question:
+
+- Relaunch silently — fastest, and the most likely to do something you did not want.
+- A dialog with checkboxes: here is what was open, tick what to restore. Safer, and it
+  doubles as a way to notice state you had forgotten about.
+- Nothing automatic; just expose the diff to `hyprplace` as a command, and let a keybind
+  or a script decide.
+
+We already capture most of what a relaunch needs: the cmdline fingerprint *is* the
+command, and `/proc` also has cwd. But note the gap this opens — placement only ever
+*moves* windows the user chose to open, whereas this *starts processes*. Relaunching a
+recorded argv is a meaningfully larger action, and it deserves an explicit opt-in and a
+confirmation step rather than being folded into placement. Some apps also should never be
+auto-restarted (installers, one-shot dialogs, anything mid-operation).
+
+Interacts with the TTL question: an entry marked active at shutdown probably should not
+expire while it is still "supposed" to be open.
+
 ### Other directions not yet considered
 
 Deliberately open. Candidates to think about when we get there: per-monitor rather than
