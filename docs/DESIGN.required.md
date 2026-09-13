@@ -124,13 +124,12 @@ compositor or the config.
 - **hyprplace runs inside the compositor process.** An uncaught Lua error or a slow
   handler in `window.open_early` blocks the compositor. Every entry point is `pcall`
   wrapped; no blocking I/O in hot paths.
-- **Reload safety.** 0.56.2 has no `config.unload` event, so `hl.on` subscriptions may
-  stack across `hyprctl reload`. Registration must be idempotent, keyed off a global.
-  *(Unverified — measure in the harness.)*
-- **XWayland class timing.** `class` may be empty at `window.open_early`; placement may
-  need to defer to the `window.class` event. *(Unverified.)*
-- **Self-echo.** Whether our own dispatch re-enters `window.move_to_workspace` is
-  unverified; the guard is written defensively either way.
+- **Reload wipes all in-memory state.** `hyprctl reload` destroys and recreates the Lua
+  VM (measured). The DB must be loaded from disk at module load; nothing may be cached
+  only in `_G` across a reload.
+- **XWayland class timing.** `class` may be empty at `window.open_early` for XWayland
+  windows, requiring a deferral to `window.class`. *(Still unverified — XWayland is
+  disabled in the probe config to avoid stray coredumps.)*
 
 ## Version skew (v0.56.2 → upstream main)
 
@@ -153,10 +152,38 @@ See [ENVIRONMENT.required.md](ENVIRONMENT.required.md). In short: a contained Hy
 source at the same commit as the installed binary, running nested-but-invisible with an
 isolated runtime dir and no GPU access, verified to leave the live session untouched.
 
+## Measured behaviour
+
+All measured in the contained harness against v0.56.2. See `harness/probe.lua`.
+
+**The Lua VM is destroyed and recreated on `hyprctl reload`.** A marker planted in `_G`
+via the repl does not survive a reload, and the config's load counter reads 1 afterwards,
+not 2. Consequences: `hl.on` subscriptions *cannot* stack, so idempotent registration is
+unnecessary; and every reload starts from an empty `_G`, so the DB must be read from disk
+at module load. The absence of `config.unload` in 0.56.2 therefore does not matter.
+
+**Event order on window open is `window.class` → `window.open_early` → `window.open`.**
+At `open_early` a native Wayland window already has `class`, `initial_class`, `title`,
+`pid`, and `workspace.id` populated — everything placement needs. `window.class` fires
+earlier still, but with empty `initial_class`/`title` and a nil workspace, so it is only
+useful as an XWayland fallback.
+
+**Our own dispatch does echo back as `window.move_to_workspace`, synchronously.** The
+handler runs inside the `hl.dispatch` call, while the guard flag is still set. So a plain
+non-reentrant boolean guard is both necessary (the echo is real) and sufficient (there is
+no async window in which the flag has already been cleared).
+
+**`hl.dsp.window.move` follows focus by default; `follow = false` makes it silent.** With
+`follow = false` the window moves and the active monitor and workspace do not change,
+which is exactly AC-2. Placement must always pass it.
+
+**Handler signature.** `window.move_to_workspace` receives `(window, workspace)`.
+
 ## Open questions
 
-- Does `hyprctl reload` re-execute Lua modules, or is the VM persistent with
-  `package.loaded` intact? Decides whether event subscriptions stack.
-- Is `class` populated at `window.open_early` for XWayland windows?
-- Does our own `window.move` dispatch echo back as `window.move_to_workspace`?
-- Which apps belong on the default exclusion list (dialogs, pickers, `hyprland-run`, 1Password)?
+- Is `class` populated at `window.open_early` for **XWayland** windows, or must placement
+  defer to `window.class`? Requires re-enabling XWayland in the probe config.
+- Which apps belong on the default exclusion list (dialogs, file pickers, `hyprland-run`,
+  a password manager)?
+- How should the ordinal be assigned when several windows of one app open near-
+  simultaneously at session start?
