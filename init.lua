@@ -17,6 +17,7 @@
 local Config    = require("hyprplace.config")
 local DB        = require("hyprplace.db")
 local Identity  = require("hyprplace.identity")
+local Learn     = require("hyprplace.learn")
 local Placement = require("hyprplace.placement")
 local Policy    = require("hyprplace.policy")
 
@@ -177,20 +178,7 @@ local function remember(w, ws_id, why)
         return
     end
 
-    local distribution, saw_self = {}, false
-    for _, other in ipairs(windows) do
-        if other.workspace and other.workspace.id and Identity.key_for(other, windows, M._cfg) == key then
-            if other.address == w.address then
-                saw_self = true
-                distribution[#distribution + 1] = ws_id
-            else
-                distribution[#distribution + 1] = other.workspace.id
-            end
-        end
-    end
-    if not saw_self then
-        distribution[#distribution + 1] = ws_id
-    end
+    local distribution = Learn.distribution(w, windows, ws_id, key, key_fn(windows))
 
     DB.observe(M._state, key, distribution, os.time(), M._cfg.max_slots)
     log("learned (%s) %q -> %d window(s)", why, key, #distribution)

@@ -216,19 +216,60 @@ function commands.watch(cfg, opts)
         if not windows then die(err) end
         local delta = CLI.window_delta(previous, windows)
 
+        -- Placement verdicts are computed over the FULL window list: how many other
+        -- windows of the same app are already on a workspace is exactly what decides
+        -- whether a remembered slot is free.
+        local plan_by_addr = {}
+        if #delta.appeared > 0 then
+            for _, r in ipairs(CLI.plan_rows(windows, state, cfg)) do
+                plan_by_addr[r.address] = r
+            end
+        end
+
         for _, w in ipairs(delta.appeared) do
-            local rows = CLI.plan_rows({ w }, state, cfg)
-            local r = rows[1]
-            io.write(string.format("+ %-20s ws %-4s  %s: %s\n",
-                r.class, tostring(r.ws or "-"), r.outcome, r.detail))
-            io.write(string.format("    key %s\n", CLI.show_key(r.key)))
+            local r = plan_by_addr[w.address]
+            io.write(string.format("+ %-18s ws %-4s %s\n",
+                w.class or "?", tostring(w.workspace and w.workspace.id or "-"),
+                CLI.short_title(w.title)))
+            if r then
+                io.write(string.format("    place  %-6s %s\n", r.outcome, r.detail))
+                io.write(string.format("    key    %s\n", CLI.show_key(r.key)))
+                if r.remembered then
+                    io.write(string.format("    slots  %s\n", CLI.show_list(r.remembered)))
+                end
+            end
         end
-        for _, w in ipairs(delta.vanished) do
-            io.write(string.format("- %-20s closed\n", w.class or "?"))
-        end
+
         for _, m in ipairs(delta.moved) do
-            io.write(string.format("~ %-20s ws %s -> %s\n",
-                m.window.class or "?", tostring(m.from), tostring(m.to)))
+            local w = m.window
+            io.write(string.format("~ %-18s ws %s -> %s  %s\n",
+                w.class or "?", tostring(m.from), tostring(m.to), CLI.short_title(w.title)))
+            local rec = CLI.would_record(w, windows, m.to, cfg)
+            io.write(string.format("    key    %s\n", CLI.show_key(rec.key)))
+            if rec.distribution then
+                io.write(string.format("    learn  %s   (%d window%s)\n",
+                    CLI.show_list(rec.distribution), #rec.distribution,
+                    #rec.distribution == 1 and "" or "s"))
+            else
+                io.write(string.format("    learn  nothing (%s)\n", tostring(rec.reason)))
+            end
+        end
+
+        for _, w in ipairs(delta.vanished) do
+            io.write(string.format("- %-18s closed from ws %s  %s\n",
+                w.class or "?", tostring(w.workspace and w.workspace.id or "-"),
+                CLI.short_title(w.title)))
+            -- Computed against the previous snapshot: by now the window is gone, but
+            -- the plugin sees it at close time.
+            local rec = CLI.would_record(w, previous or {}, w.workspace and w.workspace.id, cfg)
+            io.write(string.format("    key    %s\n", CLI.show_key(rec.key)))
+            if rec.distribution then
+                io.write(string.format("    learn  %s   (%d window%s)\n",
+                    CLI.show_list(rec.distribution), #rec.distribution,
+                    #rec.distribution == 1 and "" or "s"))
+            else
+                io.write(string.format("    learn  nothing (%s)\n", tostring(rec.reason)))
+            end
         end
         io.flush()
 

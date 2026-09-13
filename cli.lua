@@ -8,6 +8,7 @@
 local DB        = require("hyprplace.db")
 local Identity  = require("hyprplace.identity")
 local Json      = require("hyprplace.json")
+local Learn     = require("hyprplace.learn")
 local Placement = require("hyprplace.placement")
 local Policy    = require("hyprplace.policy")
 
@@ -290,6 +291,53 @@ function M.window_delta(before, after)
         end
     end
     return delta
+end
+
+--- What hyprplace would record for this window right now, and why not if it would not.
+---@param w table
+---@param windows table[]
+---@param ws_id integer|nil
+---@param cfg table
+---@return table  { key, tracked, reason, distribution }
+function M.would_record(w, windows, ws_id, cfg)
+    local tracked, reason = Policy.decide(w, windows, cfg)
+    local key = Identity.key_for(w, windows, cfg)
+    local out = { key = key, tracked = tracked, reason = reason }
+    if not tracked or not key or not ws_id then
+        return out
+    end
+    out.distribution = Learn.distribution(w, windows, ws_id, key,
+        function(o) return (Identity.key_for(o, windows, cfg)) end)
+    return out
+end
+
+--- Render a workspace list compactly.
+---@param list integer[]|nil
+---@return string
+function M.show_list(list)
+    if not list or #list == 0 then
+        return "-"
+    end
+    local out = {}
+    for _, id in ipairs(list) do
+        out[#out + 1] = tostring(id)
+    end
+    return table.concat(out, ",")
+end
+
+--- Shorten a title for single-line display.
+---@param title string|nil
+---@param width integer|nil
+---@return string
+function M.short_title(title, width)
+    width = width or 44
+    if not title or title == "" then
+        return ""
+    end
+    if #title <= width then
+        return title
+    end
+    return title:sub(1, width - 1) .. "\u{2026}"
 end
 
 -- ------------------------------------------------------------------------- presentation

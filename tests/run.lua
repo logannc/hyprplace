@@ -862,6 +862,62 @@ do
     eq(d3.vanished[1].address, "0xb", "the right one")
 end
 
+group("cli.would_record")
+do
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+    local cfg = Config.build({ ignore_classes = { "^hyprland%-run$" } })
+
+    -- Three firefox windows on 3,3,4. Moving the one on 4 to 5 should predict the whole
+    -- new distribution, not just the moved window's destination.
+    local a = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 3 })
+    local b = support.window({ class = "firefox", pid = 2, address = "0xb", workspace = 3 })
+    local c = support.window({ class = "firefox", pid = 3, address = "0xc", workspace = 4 })
+    local wins = { a, b, c }
+
+    local rec = CLI.would_record(c, wins, 5, cfg)
+    eq(CLI.show_list(rec.distribution), "3,3,5",
+        "the mover contributes its destination, the others their current workspaces")
+    eq(rec.key, "firefox", "key reported")
+    ok(rec.tracked, "tracked")
+
+    -- Moving it back predicts the original distribution again.
+    eq(CLI.show_list(CLI.would_record(c, wins, 4, cfg).distribution), "3,3,4",
+        "moving back predicts the original distribution")
+
+    local ignored = support.window({ class = "hyprland-run", pid = 9, address = "0xz", workspace = 1 })
+    local r2 = CLI.would_record(ignored, { ignored }, 1, cfg)
+    eq(r2.distribution, nil, "an ignored window predicts no record")
+    eq(r2.reason, Policy.IGNORED, "and reports why")
+
+    Identity.read_cmdline = real
+end
+
+group("learn.distribution")
+do
+    local Learn = require("hyprplace.learn")
+    local key_of = function(w) return w.class end
+    local a = support.window({ class = "kitty", address = "0xa", workspace = 1 })
+    local b = support.window({ class = "kitty", address = "0xb", workspace = 2 })
+
+    eq(CLI.show_list(Learn.distribution(a, { a, b }, 9, "kitty", key_of)), "2,9",
+        "subject contributes its new workspace, sorted")
+    eq(CLI.show_list(Learn.distribution(a, {}, 7, "kitty", key_of)), "7",
+        "a subject absent from the list still contributes")
+    eq(CLI.show_list(Learn.distribution(a, { b }, 7, "kitty", key_of)), "2,7",
+        "absent subject is added alongside the others")
+end
+
+group("cli.show_list and short_title")
+do
+    eq(CLI.show_list({ 3, 3, 4 }), "3,3,4", "duplicates shown")
+    eq(CLI.show_list({}), "-", "empty list")
+    eq(CLI.show_list(nil), "-", "nil list")
+    eq(CLI.short_title(nil), "", "nil title")
+    eq(CLI.short_title("short", 44), "short", "short titles pass through")
+    ok(#CLI.short_title(string.rep("x", 100), 20) <= 22, "long titles are truncated")
+end
+
 group("cli.show_key")
 do
     eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")
