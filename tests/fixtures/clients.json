@@ -1,0 +1,131 @@
+[
+ {
+  "address": "0x000000000100",
+  "mapped": true,
+  "hidden": false,
+  "visible": true,
+  "acceptsInput": true,
+  "at": [
+   3862,
+   56
+  ],
+  "size": [
+   1876,
+   1002
+  ],
+  "workspace": {
+   "id": 21,
+   "name": "21"
+  },
+  "floating": false,
+  "monitor": 2,
+  "class": "kitty",
+  "title": "btop — \"live\" \\ stats 😀",
+  "initialClass": "kitty",
+  "initialTitle": "kitty",
+  "pid": 1000,
+  "xwayland": false,
+  "pinned": false,
+  "pinFullscreened": false,
+  "fullscreen": 0,
+  "fullscreenClient": 0,
+  "fullscreenHandler": "default",
+  "allowedOverFullscreen": true,
+  "grouped": [],
+  "tags": [],
+  "swallowing": "",
+  "focusHistoryID": 6,
+  "inhibitingIdle": false,
+  "xdgTag": "",
+  "xdgDescription": "",
+  "contentType": "none",
+  "tearingHint": false,
+  "stableId": "18000000"
+ },
+ {
+  "address": "0x000000000101",
+  "mapped": true,
+  "hidden": false,
+  "visible": true,
+  "acceptsInput": true,
+  "at": [
+   5782,
+   56
+  ],
+  "size": [
+   1876,
+   1002
+  ],
+  "workspace": {
+   "id": 33,
+   "name": "33"
+  },
+  "floating": false,
+  "monitor": 3,
+  "class": "signal",
+  "title": "Signal",
+  "initialClass": "signal",
+  "initialTitle": "signal",
+  "pid": 1001,
+  "xwayland": false,
+  "pinned": false,
+  "pinFullscreened": false,
+  "fullscreen": 0,
+  "fullscreenClient": 0,
+  "fullscreenHandler": "default",
+  "allowedOverFullscreen": true,
+  "grouped": [],
+  "tags": [],
+  "swallowing": "",
+  "focusHistoryID": 14,
+  "inhibitingIdle": false,
+  "xdgTag": "",
+  "xdgDescription": "",
+  "contentType": "none",
+  "tearingHint": false,
+  "stableId": "18000008"
+ },
+ {
+  "address": "0x000000000102",
+  "mapped": true,
+  "hidden": false,
+  "visible": true,
+  "acceptsInput": true,
+  "at": [
+   22,
+   56
+  ],
+  "size": [
+   1876,
+   1002
+  ],
+  "workspace": {
+   "id": 2,
+   "name": "2"
+  },
+  "floating": false,
+  "monitor": 0,
+  "class": "firefox",
+  "title": "Example Page — Mozilla Firefox",
+  "initialClass": "firefox",
+  "initialTitle": "firefox",
+  "pid": 1002,
+  "xwayland": false,
+  "pinned": false,
+  "pinFullscreened": false,
+  "fullscreen": 0,
+  "fullscreenClient": 0,
+  "fullscreenHandler": "default",
+  "allowedOverFullscreen": true,
+  "grouped": [],
+  "tags": [],
+  "swallowing": "",
+  "focusHistoryID": 8,
+  "inhibitingIdle": false,
+  "xdgTag": "",
+  "xdgDescription": "",
+  "contentType": "none",
+  "tearingHint": false,
+  "stableId": "18000009"
+ }
+]

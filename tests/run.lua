@@ -569,6 +569,48 @@ do
         "no expiry shown when ttl is disabled")
 end
 
+group("json against real hyprctl output")
+do
+    -- tests/fixtures/clients.json is genuine `hyprctl -j clients` output, redacted.
+    -- Synthetic fixtures cannot catch a real-world shape we failed to imagine.
+    local f = assert(io.open(ROOT .. "/tests/fixtures/clients.json", "r"))
+    local raw = f:read("a")
+    f:close()
+
+    local clients, err = Json.decode(raw)
+    ok(clients ~= nil, "real output decodes (" .. tostring(err) .. ")")
+    eq(#clients, 3, "all clients present")
+
+    local by_class = {}
+    for _, c in ipairs(clients) do by_class[c.class] = c end
+
+    ok(by_class["kitty"] ~= nil, "kitty client found")
+    eq(by_class["kitty"].workspace.id, 21, "nested workspace id survives")
+    eq(by_class["kitty"].title, 'btop — "live" \\ stats 😀',
+        "escaped quote, backslash, em dash and emoji all round-trip")
+    eq(by_class["kitty"].floating, false, "false is preserved, not read as absent")
+    eq(type(by_class["kitty"].at), "table", "array-valued fields decode as tables")
+    eq(#by_class["kitty"].at, 2, "position is a two-element array")
+    ok(by_class["kitty"].pid > 0, "pid is a number")
+    eq(by_class["kitty"].xdgTag, "", "empty strings decode as empty, not nil")
+
+    -- And it feeds the real pipeline.
+    local windows = {}
+    for _, c in ipairs(clients) do
+        windows[#windows + 1] = {
+            address = c.address, class = c.class, initial_class = c.initialClass,
+            title = c.title, pid = c.pid,
+            workspace = c.workspace and { id = c.workspace.id } or nil,
+        }
+    end
+    local real_read = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+    local rows = CLI.fingerprint_rows(windows, Config.build({}))
+    eq(#rows, 3, "fingerprint accepts windows built from real output")
+    ok(rows[1].key ~= nil, "and derives a key from them")
+    Identity.read_cmdline = real_read
+end
+
 group("cli.show_key")
 do
     eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")
