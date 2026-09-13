@@ -124,10 +124,10 @@ local function place(w)
         return
     end
 
-    local occupied = Placement.occupied_workspaces(windows, key, w.address, key_fn(windows))
-    local target = Placement.choose(entry, occupied)
+    local counts = Placement.count_workspaces(windows, key, w.address, key_fn(windows))
+    local target = Placement.choose(entry, counts)
     if not target then
-        log("every remembered workspace for %q is taken", tostring(key))
+        log("every remembered slot for %q is filled", tostring(key))
         return
     end
 
@@ -157,7 +157,13 @@ end
 -- ---------------------------------------------------------------------------
 -- learning
 
---- Record `w` as belonging to `ws_id`.
+--- Record the whole observed distribution for `w`'s app.
+---
+--- Not just `w`'s own workspace: an app can have several windows, and remembering only
+--- the one that happened to move would lose the rest. The subject window's workspace is
+--- forced in, because on `window.close` it is unclear whether the closing window is
+--- still in the window list -- and if it is not, closing the last window of an app
+--- would record an empty distribution and forget it entirely (breaking AC-1).
 local function remember(w, ws_id, why)
     if not ws_id then
         return
@@ -170,8 +176,24 @@ local function remember(w, ws_id, why)
     if not key then
         return
     end
-    DB.record(M._state, key, ws_id, os.time(), M._cfg.max_slots)
-    log("learned (%s) %q -> %d", why, key, ws_id)
+
+    local distribution, saw_self = {}, false
+    for _, other in ipairs(windows) do
+        if other.workspace and other.workspace.id and Identity.key_for(other, windows, M._cfg) == key then
+            if other.address == w.address then
+                saw_self = true
+                distribution[#distribution + 1] = ws_id
+            else
+                distribution[#distribution + 1] = other.workspace.id
+            end
+        end
+    end
+    if not saw_self then
+        distribution[#distribution + 1] = ws_id
+    end
+
+    DB.observe(M._state, key, distribution, os.time(), M._cfg.max_slots)
+    log("learned (%s) %q -> %d window(s)", why, key, #distribution)
     schedule_save()
 end
 

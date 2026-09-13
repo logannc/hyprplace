@@ -117,13 +117,13 @@ function M.plan_rows(windows, state, cfg)
                 row.outcome = "skip"
                 row.detail  = "no record for this key"
             else
-                local occupied = Placement.occupied_workspaces(
+                local counts = Placement.count_workspaces(
                     windows, key, w.address, function(o) return (Identity.key_for(o, windows, cfg)) end)
-                local target = Placement.choose(entry, occupied)
+                local target = Placement.choose(entry, counts)
                 row.remembered = entry.workspaces
                 if not target then
                     row.outcome = "skip"
-                    row.detail  = "every remembered workspace is already occupied"
+                    row.detail  = "every remembered slot is already filled"
                 elseif row.ws == target then
                     row.outcome = "stay"
                     row.detail  = "already on workspace " .. tostring(target)

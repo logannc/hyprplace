@@ -138,32 +138,41 @@ function M.save(path, state)
     return true
 end
 
---- Record that `key` was last seen on workspace `ws`.
+--- Record the observed distribution of an app's windows across workspaces.
 ---
---- The workspace moves to the front of the list (most recent first), de-duplicated, and
---- the list is capped at `max_slots`.
+--- `workspaces` is the full list of workspaces occupied by every live window sharing
+--- this key, duplicates included -- seven Firefox windows on 2,3,3,4,4,32,1 record all
+--- seven. A snapshot rather than an accumulation: recording one observation at a time
+--- could not represent multiplicity, and accumulating counts across events would let a
+--- workspace you reopen on constantly crowd out the others.
+---
+--- Stored sorted, so the ordering is stable and does not depend on window enumeration
+--- order. Which of several identical windows lands where is arbitrary anyway -- we
+--- cannot tell them apart, which is the whole reason multiplicity is needed.
 ---@param state table
 ---@param key string
----@param ws integer
+---@param workspaces integer[]
 ---@param now integer
 ---@param max_slots integer
-function M.record(state, key, ws, now, max_slots)
-    if not key or not ws then
+function M.observe(state, key, workspaces, now, max_slots)
+    if not key or not workspaces or #workspaces == 0 then
         return
     end
-    local e = state.entries[key]
-    if not e then
-        e = { workspaces = {} }
-        state.entries[key] = e
+    local sorted = {}
+    for _, id in ipairs(workspaces) do
+        sorted[#sorted + 1] = id
+    end
+    table.sort(sorted)
+    while #sorted > (max_slots or 8) do
+        table.remove(sorted)
     end
 
-    local kept = { ws }
-    for _, id in ipairs(e.workspaces) do
-        if id ~= ws and #kept < (max_slots or 8) then
-            kept[#kept + 1] = id
-        end
+    local e = state.entries[key]
+    if not e then
+        e = {}
+        state.entries[key] = e
     end
-    e.workspaces = kept
+    e.workspaces = sorted
     e.seen = now
 end
 

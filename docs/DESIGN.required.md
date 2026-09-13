@@ -75,9 +75,24 @@ reboot. The key is layered, most specific first:
 2. `class` + instance ordinal — for multi-window apps sharing one pid.
 3. `class` alone — last resort.
 
-For multi-instance apps the record is an *ordered list* of workspaces. On open, take the
-first remembered workspace not already occupied by a live window with the same key.
-Windows beyond the remembered count get no placement rather than a guess.
+For multi-instance apps the record is the **observed distribution**: the full list of
+workspaces occupied by every live window sharing the key, duplicates included. Seven
+Firefox windows across 2,3,3,4,4,32,1 record all seven, because three of them genuinely
+belong on workspace 3 and a de-duplicated set would place only one there.
+
+It is a snapshot, not an accumulation. Each learning event re-observes the whole
+distribution and replaces the record. Accumulating one observation at a time could not
+represent multiplicity, and summing counts across events would let a workspace you
+reopen on constantly crowd the others out.
+
+On open, placement counts how many live windows of the app sit on each workspace and
+walks the remembered distribution in order: the k-th occurrence of a workspace is
+available when fewer than k windows are already there. Windows beyond the remembered
+count get no placement rather than a guess.
+
+The record deliberately includes the subject window's own workspace even when it is
+absent from the window list, which can happen on `window.close`. Otherwise closing the
+last window of an app would record an empty distribution and forget it entirely.
 
 ## Learning: what counts as "deliberate"
 

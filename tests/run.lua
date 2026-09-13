@@ -145,8 +145,8 @@ local DB = require("hyprplace.db")
 group("db.serialize/deserialize")
 do
     local s = DB.empty()
-    DB.record(s, "firefox", 3, 1000, 8)
-    DB.record(s, "kitty\0kitty btop", 21, 1001, 8)
+    DB.observe(s, "firefox", { 3 }, 1000, 8)
+    DB.observe(s, "kitty\0kitty btop", { 21 }, 1001, 8)
     local round = DB.deserialize(DB.serialize(s))
     eq(round.version, DB.VERSION, "version survives")
     eq(round.entries["firefox"].workspaces[1], 3, "workspace survives")
@@ -162,28 +162,34 @@ do
     eq(next(DB.deserialize("os.exit(1)").entries), nil, "no ambient access in the sandbox")
 end
 
-group("db.record")
+group("db.observe")
 do
     local s = DB.empty()
-    DB.record(s, "k", 1, 100, 3)
-    DB.record(s, "k", 2, 101, 3)
-    eq(s.entries["k"].workspaces[1], 2, "most recent first")
-    eq(s.entries["k"].workspaces[2], 1, "previous retained behind it")
+    DB.observe(s, "k", { 4, 2, 2 }, 100, 8)
+    eq(#s.entries["k"].workspaces, 3, "duplicates are kept -- multiplicity matters")
+    eq(s.entries["k"].workspaces[1], 2, "stored sorted for stable ordering")
+    eq(s.entries["k"].workspaces[3], 4, "sorted ascending")
+    eq(s.entries["k"].seen, 100, "timestamp recorded")
 
-    DB.record(s, "k", 1, 102, 3)
-    eq(s.entries["k"].workspaces[1], 1, "re-recording moves to front")
-    eq(#s.entries["k"].workspaces, 2, "and does not duplicate")
+    -- A snapshot replaces; it does not accumulate. Otherwise a workspace you reopen on
+    -- constantly would crowd out the others.
+    DB.observe(s, "k", { 9 }, 101, 8)
+    eq(#s.entries["k"].workspaces, 1, "a later observation replaces the earlier one")
+    eq(s.entries["k"].workspaces[1], 9, "with the newly observed distribution")
 
-    DB.record(s, "k", 5, 103, 3)
-    DB.record(s, "k", 6, 104, 3)
-    eq(#s.entries["k"].workspaces, 3, "capped at max_slots")
+    local big = {}
+    for n = 1, 20 do big[n] = n end
+    DB.observe(s, "k", big, 102, 5)
+    eq(#s.entries["k"].workspaces, 5, "capped at max_slots")
+
+    DB.observe(s, "empty", {}, 103, 8)
+    eq(s.entries["empty"], nil, "an empty observation records nothing")
 end
 
 group("db.touch")
 do
     local s = DB.empty()
-    DB.record(s, "k", 5, 100, 8)
-    DB.record(s, "k", 3, 101, 8)   -- order is now {3, 5}
+    DB.observe(s, "k", { 5, 3 }, 101, 8)   -- sorted to {3, 5}
     ok(DB.touch(s, "k", 999), "touch reports it found the entry")
     eq(s.entries["k"].seen, 999, "seen is refreshed")
     eq(s.entries["k"].workspaces[1], 3, "slot order is not disturbed")
@@ -195,15 +201,15 @@ group("db.prune")
 do
     local now = 1000000
     local s = DB.empty()
-    DB.record(s, "fresh", 1, now, 8)
-    DB.record(s, "stale", 1, now - (91 * 86400), 8)
+    DB.observe(s, "fresh", { 1 }, now, 8)
+    DB.observe(s, "stale", { 1 }, now - (91 * 86400), 8)
     local _, dropped = DB.prune(s, 90, now)
     eq(dropped, 1, "one entry expired")
     ok(s.entries["fresh"] ~= nil, "fresh entry kept")
     eq(s.entries["stale"], nil, "stale entry dropped")
 
     local s2 = DB.empty()
-    DB.record(s2, "old", 1, 0, 8)
+    DB.observe(s2, "old", { 1 }, 0, 8)
     local _, d2 = DB.prune(s2, 0, now)
     eq(d2, 0, "ttl of 0 disables expiry")
 end
@@ -212,7 +218,7 @@ group("db.save/load round trip")
 do
     local path = os.tmpname()
     local s = DB.empty()
-    DB.record(s, "firefox", 7, 12345, 8)
+    DB.observe(s, "firefox", { 7 }, 12345, 8)
     local saved, err = DB.save(path, s)
     ok(saved, "save succeeded (" .. tostring(err) .. ")")
     eq(DB.load(path).entries["firefox"].workspaces[1], 7, "loaded what we saved")
@@ -224,24 +230,35 @@ end
 
 local Placement = require("hyprplace.placement")
 
-group("placement")
+group("placement counts windows per workspace")
 do
     local key_of = function(w) return w.class end
     local a = support.window({ class = "kitty", address = "0xa", workspace = 1 })
     local b = support.window({ class = "kitty", address = "0xb", workspace = 2 })
-    local c = support.window({ class = "firefox", address = "0xc", workspace = 3 })
+    local c = support.window({ class = "kitty", address = "0xc", workspace = 2 })
+    local d = support.window({ class = "firefox", address = "0xd", workspace = 3 })
 
-    local occ = Placement.occupied_workspaces({ a, b, c }, "kitty", "0xa", key_of)
-    ok(occ[2], "counts another window of the same app")
-    ok(not occ[1], "excludes the window being placed")
-    ok(not occ[3], "ignores other apps")
+    local counts = Placement.count_workspaces({ a, b, c, d }, "kitty", "0xa", key_of)
+    eq(counts[2], 2, "counts two windows on the same workspace")
+    eq(counts[1], nil, "excludes the window being placed")
+    eq(counts[3], nil, "ignores other apps")
+end
 
-    eq(Placement.choose({ workspaces = { 2, 1, 5 } }, { [2] = true }), 1,
-        "skips occupied and takes the next remembered")
-    eq(Placement.choose({ workspaces = { 2 } }, { [2] = true }), nil,
-        "all remembered taken -> no placement")
+group("placement.choose")
+do
+    eq(Placement.choose({ workspaces = { 2, 1, 5 } }, { [2] = 1 }), 1,
+        "skips a filled slot and takes the next")
+    eq(Placement.choose({ workspaces = { 2 } }, { [2] = 1 }), nil,
+        "every slot filled -> no placement")
     eq(Placement.choose(nil, {}), nil, "no entry -> no placement")
     eq(Placement.choose({ workspaces = {} }, {}), nil, "empty entry -> no placement")
+
+    -- The case that motivated all of this: several windows of one app on one workspace.
+    local entry = { workspaces = { 3, 3, 4 } }
+    eq(Placement.choose(entry, {}), 3, "first window goes to 3")
+    eq(Placement.choose(entry, { [3] = 1 }), 3, "second also goes to 3 -- remembered twice")
+    eq(Placement.choose(entry, { [3] = 2 }), 4, "third moves on to 4")
+    eq(Placement.choose(entry, { [3] = 2, [4] = 1 }), nil, "fourth has nowhere remembered")
 end
 
 -- --------------------------------------------------------------------------- policy
@@ -310,7 +327,7 @@ group("placement dispatch")
 do
     local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
     local hp, h = fresh({ w })
-    DB.record(hp.state(), "firefox", 3, os.time(), 8)
+    DB.observe(hp.state(), "firefox", { 3 }, os.time(), 8)
 
     h.handlers["window.open_early"](w)
     eq(#h.dispatched, 1, "dispatched exactly one move")
@@ -329,13 +346,13 @@ do
 
     local w2 = support.window({ class = "firefox", address = "0xb", workspace = 3 })
     local hp2, h2 = fresh({ w2 })
-    DB.record(hp2.state(), "firefox", 3, os.time(), 8)
+    DB.observe(hp2.state(), "firefox", { 3 }, os.time(), 8)
     h2.handlers["window.open_early"](w2)
     eq(#h2.dispatched, 0, "already on the remembered workspace -> no dispatch")
 
     local w3 = support.window({ class = "hyprland-run", address = "0xc", workspace = 9 })
     local hp3, h3 = fresh({ w3 })
-    DB.record(hp3.state(), "hyprland-run", 1, os.time(), 8)
+    DB.observe(hp3.state(), "hyprland-run", { 1 }, os.time(), 8)
     h3.handlers["window.open_early"](w3)
     eq(#h3.dispatched, 0, "ignore_classes are never placed")
 end
@@ -345,29 +362,29 @@ do
     -- The compositor echoes our own move back synchronously; without the guard we would
     -- learn from our own placement. This is the measured behaviour, replayed.
     --
-    -- The entry is {5, 3} with another window already on 5, so placement picks 3. If the
-    -- echo were learned, DB.record would promote 3 to the front and the order would flip
-    -- to {3, 5}. Order is therefore the discriminator -- `seen` is not, because placement
-    -- legitimately refreshes it.
+    -- The entry is {3, 5} with another window already on 5, so placement picks 3. If the
+    -- echo were learned, the observation would collapse the entry to the two windows'
+    -- actual workspaces and the remembered 5 would be lost. Slot contents are therefore
+    -- the discriminator -- `seen` is not, because placement legitimately refreshes it.
     local w     = support.window({ class = "firefox", address = "0xa", workspace = 9 })
     local other = support.window({ class = "firefox", address = "0xb", workspace = 5 })
     local hp, h = fresh({ w, other })
     h.echo_move = true
-    DB.record(hp.state(), "firefox", 3, 1000, 8)
-    DB.record(hp.state(), "firefox", 5, 1001, 8)   -- order {5, 3}
+    DB.observe(hp.state(), "firefox", { 5, 3 }, 1000, 8)   -- sorted to {3, 5}
 
     h.handlers["window.open_early"](w)
     eq(h.dispatched[1].args.workspace, 3, "placed on the first free remembered slot")
-    eq(hp.state().entries["firefox"].workspaces[1], 5,
-        "the echo of our own move did not reorder the slots")
-    eq(hp.state().entries["firefox"].workspaces[2], 3, "second slot still second")
+    eq(#hp.state().entries["firefox"].workspaces, 2,
+        "the echo of our own move was not learned from")
+    eq(hp.state().entries["firefox"].workspaces[1], 3, "slots intact")
+    eq(hp.state().entries["firefox"].workspaces[2], 5, "both slots intact")
 end
 
 group("placement refreshes recency")
 do
     local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
     local hp, h = fresh({ w })
-    DB.record(hp.state(), "firefox", 3, 1000, 8)
+    DB.observe(hp.state(), "firefox", { 3 }, 1000, 8)
     h.handlers["window.open_early"](w)
     ok(hp.state().entries["firefox"].seen > 1000,
         "an app you keep reopening does not expire, even if never moved")
@@ -375,7 +392,7 @@ do
     -- Also refreshed when the window is already where it belongs and no move is needed.
     local w2 = support.window({ class = "discord", address = "0xb", workspace = 3 })
     local hp2, h2 = fresh({ w2 })
-    DB.record(hp2.state(), "discord", 3, 1000, 8)
+    DB.observe(hp2.state(), "discord", { 3 }, 1000, 8)
     h2.handlers["window.open_early"](w2)
     eq(#h2.dispatched, 0, "no move needed")
     ok(hp2.state().entries["discord"].seen > 1000, "but recency still refreshed")
@@ -408,6 +425,50 @@ do
     eq(hp3.state().entries["signal"].workspaces[1], 7, "learning resumes after settling")
 end
 
+group("multi-window apps record their whole distribution")
+do
+    -- The case from a live session: seven Firefox windows across 2,3,3,4,4,32,1. Three
+    -- of them share workspace 3. Remembering a set would place only one there.
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+
+    local ws = { 2, 3, 3, 4, 4, 32, 1 }
+    local wins = {}
+    for i, id in ipairs(ws) do
+        wins[i] = support.window({ class = "firefox", pid = 500 + i,
+                                   address = "0x" .. i, workspace = id })
+    end
+    local hp, h = fresh(wins)
+    h.flush_timers()
+    h.handlers["window.close"](wins[1])
+
+    local slots = hp.state().entries["firefox"].workspaces
+    eq(#slots, 7, "all seven windows are remembered, not five distinct workspaces")
+    local threes = 0
+    for _, id in ipairs(slots) do if id == 3 then threes = threes + 1 end end
+    eq(threes, 2, "workspace 3 is remembered twice over")
+
+    -- And placement can fill them: with two already on 3, a third window still goes to 3.
+    local entry = hp.state().entries["firefox"]
+    eq(Placement.choose(entry, {}), 1, "first window takes the lowest remembered slot")
+    eq(Placement.choose(entry, { [1] = 1, [2] = 1, [3] = 1 }), 3,
+        "a second window still goes to 3, because 3 was remembered twice")
+
+    Identity.read_cmdline = real
+end
+
+group("closing the last window still records it")
+do
+    -- If the closing window is absent from the window list, a naive distribution would
+    -- be empty and the app would be forgotten entirely -- breaking AC-1.
+    local w = support.window({ class = "signal", address = "0xa", workspace = 33 })
+    local hp, h = fresh({})          -- window list does NOT contain the closing window
+    h.flush_timers()
+    h.handlers["window.close"](w)
+    eq(hp.state().entries["signal"].workspaces[1], 33,
+        "the closing window's own workspace is recorded regardless")
+end
+
 group("session lifecycle freeze")
 do
     -- At session start the compositor, hyprsplit and autostart all move windows before
@@ -415,7 +476,7 @@ do
     -- layout -- and then place windows there next boot.
     local w = support.window({ class = "firefox", address = "0xa", workspace = 1 })
     local hp, h = fresh({ w })
-    DB.record(hp.state(), "firefox", 3, 1000, 8)
+    DB.observe(hp.state(), "firefox", { 3 }, 1000, 8)
 
     h.handlers["window.move_to_workspace"](w, { id = 1 })
     eq(hp.state().entries["firefox"].workspaces[1], 3,
@@ -432,7 +493,7 @@ do
     -- the entire point of the plugin.
     local w2 = support.window({ class = "discord", address = "0xb", workspace = 1 })
     local hp2, h2 = fresh({ w2 })
-    DB.record(hp2.state(), "discord", 31, 1000, 8)
+    DB.observe(hp2.state(), "discord", { 31 }, 1000, 8)
     h2.handlers["window.open_early"](w2)
     eq(h2.dispatched[1].args.workspace, 31, "placement still happens during startup")
 end
@@ -630,7 +691,7 @@ do
 
     local cfg = Config.build({})
     local state = DB.empty()
-    DB.record(state, "firefox", 3, os.time(), 8)
+    DB.observe(state, "firefox", { 3 }, os.time(), 8)
 
     local w = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 9 })
     local rows = CLI.plan_rows({ w }, state, cfg)
@@ -650,7 +711,7 @@ do
     local b = support.window({ class = "firefox", pid = 2, address = "0xb", workspace = 9 })
     local rows2 = CLI.plan_rows({ a, b }, state, cfg)
     eq(rows2[2].outcome, "skip", "second instance has no free remembered slot")
-    ok(rows2[2].detail:match("occupied"), "and says the slots are occupied")
+    ok(rows2[2].detail:match("filled"), "and says the slots are filled")
 
     Identity.read_cmdline = real
 end
@@ -660,8 +721,8 @@ do
     local cfg = Config.build({ ttl_days = 90 })
     local now = 1000000
     local state = DB.empty()
-    DB.record(state, "old", 1, now - (10 * 86400), 8)
-    DB.record(state, "new", 2, now, 8)
+    DB.observe(state, "old", { 1 }, now - (10 * 86400), 8)
+    DB.observe(state, "new", { 2 }, now, 8)
     local rows = CLI.db_rows(state, cfg, now)
     eq(#rows, 2, "one row per entry")
     eq(rows[1].key, "new", "newest first")
