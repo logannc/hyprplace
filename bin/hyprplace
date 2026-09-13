@@ -184,6 +184,22 @@ function commands.prune(cfg, opts)
     io.write(string.format("\ndropped %d entr%s\n", dropped, dropped == 1 and "y" or "ies"))
 end
 
+--- Sleep, returning false if the wait was interrupted.
+---
+--- Deliberately io.popen and not os.execute. os.execute uses system(3), which per POSIX
+--- ignores SIGINT and SIGQUIT in the *calling* process for the child's lifetime -- and
+--- since watch spends essentially all its time in here, Ctrl-C could never reach us.
+--- popen has no such behaviour, so the interrupt lands on the read.
+local function nap(seconds)
+    local pipe = io.popen("sleep " .. tostring(seconds))
+    if not pipe then
+        return true
+    end
+    local ok = pcall(function() pipe:read("a") end)
+    pcall(function() pipe:close() end)
+    return ok
+end
+
 function commands.watch(cfg, opts)
     local interval = opts.interval or 1
     local state = DB.load(cfg.db_path)
@@ -217,7 +233,11 @@ function commands.watch(cfg, opts)
         io.flush()
 
         previous = windows
-        os.execute("sleep " .. tostring(interval))
+        if not nap(interval) then
+            io.write("\nstopped\n")
+            io.flush()
+            return
+        end
     end
 end
 
