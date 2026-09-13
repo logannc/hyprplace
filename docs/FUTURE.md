@@ -154,6 +154,27 @@ a hash, not the text. Matching power is unchanged and no browsing history lands 
 The cost is that the tools cannot display a stored title directly, though `fingerprint`
 could hash live titles and correlate, which is probably enough for debugging.
 
+Be honest about what hashing buys: it is disclosure resistance, not anonymization. It
+stops casual reading of the state file, which is the realistic risk. It does not stop
+confirmation -- anyone holding the file can hash a guessed title and test for a match.
+Do not describe it as anonymous.
+
+#### Sampling must be optional, and off by default
+
+Title sampling has to be a config switch so it can be turned off entirely.
+
+If hyprplace is ever published, that switch should default to **disabled**, not
+enabled-with-an-opt-out. Someone installing a workspace-placement plugin has not
+consented to having window titles read and persisted, and opt-out puts the burden on the
+people least likely to read the config. The plugin should be fully functional with
+sampling off -- it is a disambiguation improvement for multi-window apps, not a
+dependency.
+
+Publishing tightens other defaults too, though the important ones are already right:
+workspace ids are stored raw with no hyprsplit coupling, `require_cmdline` and
+`keep_flags` are empty rather than tuned to one machine, and `ignore_classes` carries only
+a launcher. The remaining question is the TTL default.
+
 Related: this is the same machinery as "is there more to learn between lifecycle points"
 below, and probably wants to be designed once for both.
 
