@@ -125,7 +125,32 @@ be watched over time, not read once. Polling is the right mechanism, not a compr
   unbounded-frequency handler in the compositor's hot path.
 - A repeating `hl.timer` over `hl.get_windows()` is O(windows) every N seconds --
   bounded and predictable. `hl.timer` already supports `type = "repeat"`.
-- A slow interval is sufficient. This is identity, not telemetry.
+- A slow interval is sufficient. This is identity, not telemetry. Around **10s** is the
+  starting point.
+
+**The plugin's sampler and `hyprplace watch` are not the same kind of poller**, and
+should not share an interval or a config key:
+
+| | `watch` | plugin sampler |
+|---|---|---|
+| Audience | a person staring at a shell | nobody |
+| Requirement | low latency, immediate feedback | eventual accuracy |
+| Missing an intermediate state | a visible failure | irrelevant |
+| Interval | 0.25s | ~10s |
+
+The plugin only needs whatever a window *settled* on, so intermediate titles it never
+observes cost nothing. `watch` is the opposite: the user just did something and wants to
+see it reflected, and anything undone inside one interval looks like nothing happened --
+which is precisely how the 1s default was caught being too slow.
+
+Two consequences of a ~10s sampler:
+
+- A window that lives less than one interval is never sampled at all, so the learn-time
+  title read stays as the fallback. This is the same requirement noted above, arrived at
+  from the other direction.
+- Dwell weighting still works, just coarsely. It is a statistical sample of what a window
+  displayed over its life, and at 10s a window open for an hour still yields ~360
+  observations -- far more than enough to separate a stable title from a churning one.
 
 Sampling also yields two things the event does not:
 
