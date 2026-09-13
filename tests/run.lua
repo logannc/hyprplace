@@ -899,6 +899,35 @@ do
     eq(d3.vanished[1].address, "0xb", "the right one")
 end
 
+group("plugin and tools share one placement decision")
+do
+    -- The point of Placement.decide: what `hyprplace plan` prints is produced by the
+    -- same call the plugin acts on, so the tools cannot drift from reality.
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+    local cfg = Config.build({})
+    local state = DB.empty()
+    DB.observe(state, "firefox", { 3 }, os.time(), cfg.max_slots)
+
+    local w = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 9 })
+    local windows = { w }
+
+    local direct = Placement.decide(w, windows, state, cfg)
+    local viaCli = CLI.plan_rows(windows, state, cfg)[1]
+    eq(viaCli.outcome, direct.outcome, "same outcome")
+    eq(viaCli.target, direct.target, "same target")
+    eq(viaCli.detail, direct.detail, "same explanation")
+
+    -- And the plugin acts on exactly that verdict.
+    local hp, h = fresh(windows)
+    DB.observe(hp.state(), "firefox", { 3 }, os.time(), cfg.max_slots)
+    h.handlers["window.open_early"](w)
+    eq(h.dispatched[1].args.workspace, direct.target,
+        "the plugin dispatches the target the tools predicted")
+
+    Identity.read_cmdline = real
+end
+
 group("cli.would_record")
 do
     local real = Identity.read_cmdline

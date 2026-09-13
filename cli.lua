@@ -93,6 +93,8 @@ function M.fingerprint_rows(windows, cfg)
 end
 
 --- Where each currently-open window would be placed if it opened right now.
+---
+--- A thin rendering of Placement.decide, which is the same code the plugin runs.
 ---@param windows table[]
 ---@param state table
 ---@param cfg table
@@ -100,43 +102,7 @@ end
 function M.plan_rows(windows, state, cfg)
     local rows = {}
     for _, w in ipairs(windows) do
-        local tracked, reason = Policy.decide(w, windows, cfg)
-        local key = Identity.key_for(w, windows, cfg)
-        local row = {
-            address = w.address,
-            class   = Policy.class_of(w) or "(none)",
-            ws      = w.workspace and w.workspace.id,
-            key     = key,
-            tracked = tracked,
-        }
-        if not tracked then
-            row.outcome = "skip"
-            row.detail  = Policy.EXPLAIN[reason] or reason
-        else
-            local entry = DB.lookup(state, key)
-            if not entry then
-                row.outcome = "skip"
-                row.detail  = "no record for this key"
-            else
-                local counts = Placement.count_workspaces(
-                    windows, key, w.address, function(o) return (Identity.key_for(o, windows, cfg)) end)
-                local target = Placement.choose(entry, counts)
-                row.remembered = entry.workspaces
-                if not target then
-                    row.outcome = "skip"
-                    row.detail  = "every remembered slot is already filled"
-                elseif row.ws == target then
-                    row.outcome = "stay"
-                    row.detail  = "already on workspace " .. tostring(target)
-                    row.target  = target
-                else
-                    row.outcome = "move"
-                    row.detail  = string.format("workspace %s -> %d", tostring(row.ws), target)
-                    row.target  = target
-                end
-            end
-        end
-        rows[#rows + 1] = row
+        rows[#rows + 1] = Placement.decide(w, windows, state, cfg)
     end
     return rows
 end

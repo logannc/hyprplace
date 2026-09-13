@@ -1,4 +1,13 @@
--- Choosing where a window should go. Pure logic, no `hl` dependency.
+-- Choosing where a window should go. No `hl` dependency, so it runs identically inside
+-- the compositor and inside the CLI tools.
+--
+-- `decide` is the single implementation of the placement decision. The plugin acts on
+-- its verdict and the tools render it, so `hyprplace plan` and `hyprplace watch` cannot
+-- drift from what actually happens.
+
+local DB       = require("hyprplace.db")
+local Identity = require("hyprplace.identity")
+local Policy   = require("hyprplace.policy")
 
 local M = {}
 
@@ -51,6 +60,63 @@ function M.choose(entry, counts)
         end
     end
     return nil
+end
+
+--- The placement verdict for one window.
+---
+--- outcome is one of:
+---   skip   hyprplace does nothing and Hyprland decides (AC-3)
+---   stay   the window is already on the workspace it belongs to
+---   move   the window should be moved to `target`
+---@param w table
+---@param windows table[]
+---@param state table
+---@param cfg table
+---@return table
+function M.decide(w, windows, state, cfg)
+    local tracked, reason = Policy.decide(w, windows, cfg)
+    local key = Identity.key_for(w, windows, cfg)
+    local verdict = {
+        key     = key,
+        tracked = tracked,
+        reason  = reason,
+        ws      = w.workspace and w.workspace.id,
+        address = w.address,
+        class   = Policy.class_of(w) or "(none)",
+    }
+
+    if not tracked then
+        verdict.outcome = "skip"
+        verdict.detail  = Policy.EXPLAIN[reason] or reason
+        return verdict
+    end
+
+    local entry = key and DB.lookup(state, key)
+    if not entry then
+        verdict.outcome = "skip"
+        verdict.detail  = "no record for this key"
+        return verdict
+    end
+    verdict.remembered = entry.workspaces
+
+    local counts = M.count_workspaces(windows, key, w.address,
+        function(o) return (Identity.key_for(o, windows, cfg)) end)
+    local target = M.choose(entry, counts)
+    if not target then
+        verdict.outcome = "skip"
+        verdict.detail  = "every remembered slot is already filled"
+        return verdict
+    end
+
+    verdict.target = target
+    if verdict.ws == target then
+        verdict.outcome = "stay"
+        verdict.detail  = "already on workspace " .. tostring(target)
+    else
+        verdict.outcome = "move"
+        verdict.detail  = string.format("workspace %s -> %d", tostring(verdict.ws), target)
+    end
+    return verdict
 end
 
 return M

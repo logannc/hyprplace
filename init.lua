@@ -114,40 +114,30 @@ local function place(w)
         return
     end
     local windows = hl.get_windows()
-    if not tracked(w, windows) then
-        return
-    end
+    local verdict = Placement.decide(w, windows, M._state, M._cfg)
 
-    local key = Identity.key_for(w, windows, M._cfg)
-    local entry = DB.lookup(M._state, key)
-    if not entry then
-        log("no record for %q", tostring(key))
-        return
-    end
-
-    local counts = Placement.count_workspaces(windows, key, w.address, key_fn(windows))
-    local target = Placement.choose(entry, counts)
-    if not target then
-        log("every remembered slot for %q is filled", tostring(key))
+    if verdict.outcome == "skip" then
+        log("skip %s: %s", tostring(verdict.key), verdict.detail)
         return
     end
 
     -- Acting on an entry is evidence it is still in use: refresh recency so an app you
-    -- keep reopening never expires, even if you never explicitly move it.
-    DB.touch(M._state, key, os.time())
+    -- keep reopening never expires, even if you never explicitly move it. Applies to
+    -- `stay` too -- the window being in the right place is still use.
+    DB.touch(M._state, verdict.key, os.time())
     schedule_save()
 
-    if w.workspace and w.workspace.id == target then
+    if verdict.outcome == "stay" then
         return
     end
 
     -- Note: the target workspace need not exist yet. At session start most workspaces
     -- do not, and Hyprland creates one on demand -- which is exactly what we want when
     -- restoring after a reboot.
-    log("placing %q -> workspace %d", tostring(key), target)
+    log("placing %q -> workspace %d", tostring(verdict.key), verdict.target)
     M._guard = true
     local ok, err = pcall(function()
-        hl.dispatch(hl.dsp.window.move({ window = w, workspace = target, follow = false }))
+        hl.dispatch(hl.dsp.window.move({ window = w, workspace = verdict.target, follow = false }))
     end)
     M._guard = false
     if not ok then
