@@ -115,6 +115,45 @@ slots a given window claims. A wrong guess then costs a misplaced window instead
 poisoned key that never matches again -- the Steam failure mode, which we should not
 reintroduce by another route.
 
+#### Sampling rather than subscribing
+
+For the navigation case -- a window whose title changes as it is used -- the title has to
+be watched over time, not read once. Polling is the right mechanism, not a compromise:
+
+- `hl.on("window.title")` fires on every title change of every window: every page load,
+  every tab switch, every terminal that rewrites its title per command. That is an
+  unbounded-frequency handler in the compositor's hot path.
+- A repeating `hl.timer` over `hl.get_windows()` is O(windows) every N seconds --
+  bounded and predictable. `hl.timer` already supports `type = "repeat"`.
+- A slow interval is sufficient. This is identity, not telemetry.
+
+Sampling also yields two things the event does not:
+
+- **Dwell time.** The instantaneous title at learn time is a coin flip; you may catch a
+  window mid-navigation. Sampling shows which title a window spent its life displaying,
+  which is the stable signal underneath the noise.
+- **Volatility detection.** A title unchanged for an hour is worth keying on. One that
+  differs every sample (a terminal running `top`, a player counting timestamps) is noise,
+  and sampling identifies it as noise without being told.
+
+Keep the learn-time title as a fallback: a window opened and closed inside one sampling
+interval would otherwise never be sampled at all.
+
+Constraints, since this runs inside the compositor: no `/proc` reads in the sampler, and
+the work must stay proportional to the window count.
+
+#### Privacy: titles must not be stored in the clear
+
+This one is a prerequisite, not a nicety. Real titles from a live session include
+`Inbox (37) - <address> - Gmail` and the subreddit being read. Persisting them writes an
+email address and browsing history to a plaintext file, which is a categorical change
+from what hyprplace stores today (classes and argv).
+
+We only ever need to *match* titles across sessions, never to read them back -- so store
+a hash, not the text. Matching power is unchanged and no browsing history lands on disk.
+The cost is that the tools cannot display a stored title directly, though `fingerprint`
+could hash live titles and correlate, which is probably enough for debugging.
+
 Related: this is the same machinery as "is there more to learn between lifecycle points"
 below, and probably wants to be designed once for both.
 
