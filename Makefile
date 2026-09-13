@@ -1,6 +1,6 @@
 LUA ?= lua
 DEST ?= $(HOME)/.config/hypr/hyprplace
-SRC := init.lua config.lua db.lua identity.lua placement.lua
+SRC := init.lua config.lua db.lua identity.lua placement.lua json.lua
 
 .PHONY: check test all install
 

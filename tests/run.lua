@@ -382,6 +382,62 @@ do
     os.remove(path)
 end
 
+-- ----------------------------------------------------------------------------- json
+
+local Json = require("hyprplace.json")
+
+group("json scalars")
+do
+    eq(Json.decode("1"), 1, "integer")
+    eq(Json.decode("-2.5"), -2.5, "negative float")
+    eq(Json.decode("1e3"), 1000, "exponent")
+    eq(Json.decode("true"), true, "true")
+    eq(Json.decode("false"), false, "false")
+    eq(Json.decode('"hi"'), "hi", "string")
+    eq(tostring(Json.decode("null")), "null", "null is a sentinel, not nil")
+    eq(Json.decode('  7  '), 7, "surrounding whitespace")
+end
+
+group("json strings")
+do
+    eq(Json.decode([["a\nb"]]), "a\nb", "escape sequences")
+    eq(Json.decode([["q\"q"]]), 'q"q', "escaped quote")
+    eq(Json.decode([["\u00e9"]]), "é", "\\u escape")
+    eq(Json.decode([["\ud83d\ude00"]]), "😀", "surrogate pair")
+    eq(Json.decode('"~/workspace/hyprplace"'), "~/workspace/hyprplace", "plain path")
+end
+
+group("json structures")
+do
+    local a = Json.decode("[1,2,3]")
+    eq(#a, 3, "array length")
+    eq(a[2], 2, "array indexing is 1-based")
+    eq(#Json.decode("[]"), 0, "empty array")
+    eq(next(Json.decode("{}")), nil, "empty object")
+
+    local o = Json.decode('{"a":{"b":[1,{"c":true}]}}')
+    eq(o.a.b[2].c, true, "nested access")
+
+    -- Shaped like real hyprctl output.
+    local clients = Json.decode(
+        '[{"address":"0x1","class":"kitty","pid":100,"workspace":{"id":3,"name":"3"},"floating":false}]')
+    eq(clients[1].class, "kitty", "client class")
+    eq(clients[1].workspace.id, 3, "nested workspace id")
+    eq(clients[1].floating, false, "false is preserved, not treated as absent")
+end
+
+group("json rejects bad input")
+do
+    ok(Json.decode("{") == nil, "truncated object")
+    ok(Json.decode("[1,]") == nil, "trailing comma")
+    ok(Json.decode('{"a" 1}') == nil, "missing colon")
+    ok(Json.decode('"unterminated') == nil, "unterminated string")
+    ok(Json.decode("1 2") == nil, "trailing content")
+    ok(Json.decode(nil) == nil, "non-string input")
+    local _, err = Json.decode("{")
+    ok(type(err) == "string" and err:match("json"), "returns an error message")
+end
+
 -- --------------------------------------------------------------------------- report
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
