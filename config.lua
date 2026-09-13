@@ -38,6 +38,13 @@ function M.defaults()
         -- A KVM swap or hotplug reflows whole workspaces; that is not user intent.
         monitor_settle_ms = 2000,
 
+        -- Milliseconds after the config loads during which moves are not learned from.
+        -- At session start the compositor, hyprsplit and autostart all move windows
+        -- around before anything settles; none of it is user intent. This also covers
+        -- `hyprctl reload`, which re-runs the config and triggers hyprsplit's workspace
+        -- reflow. Tune if apps on your machine take longer than this to settle.
+        startup_settle_ms = 8000,
+
         -- Milliseconds to coalesce DB writes.
         save_debounce_ms = 1000,
 

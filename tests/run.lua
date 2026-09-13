@@ -352,18 +352,21 @@ group("learning from real moves")
 do
     local w = support.window({ class = "firefox", address = "0xa", workspace = 3 })
     local hp, h = fresh({ w })
+    h.flush_timers()
     h.handlers["window.move_to_workspace"](w, { id = 7 })
     eq(hp.state().entries["firefox"].workspaces[1], 7, "a user move is learned")
 
     -- Mass moves (hyprsplit swap_monitors) do not carry focus on every window.
     local u = support.window({ class = "discord", address = "0xb", workspace = 3, active = false })
     local hp2, h2 = fresh({ u })
+    h2.flush_timers()
     h2.handlers["window.move_to_workspace"](u, { id = 7 })
     eq(hp2.state().entries["discord"], nil, "an unfocused window's move is not learned")
 
     -- Monitor hotplug reflows whole workspaces; a KVM swap must not rewrite the db.
     local m = support.window({ class = "signal", address = "0xc", workspace = 3 })
     local hp3, h3 = fresh({ m })
+    h3.flush_timers()   -- clear the startup freeze
     h3.handlers["monitor.added"]()
     h3.handlers["window.move_to_workspace"](m, { id = 7 })
     eq(hp3.state().entries["signal"], nil, "moves during monitor settling are ignored")
@@ -372,11 +375,75 @@ do
     eq(hp3.state().entries["signal"].workspaces[1], 7, "learning resumes after settling")
 end
 
+group("session lifecycle freeze")
+do
+    -- At session start the compositor, hyprsplit and autostart all move windows before
+    -- anything settles. Learning then would overwrite good state with the transient
+    -- layout -- and then place windows there next boot.
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 1 })
+    local hp, h = fresh({ w })
+    DB.record(hp.state(), "firefox", 3, 1000, 8)
+
+    h.handlers["window.move_to_workspace"](w, { id = 1 })
+    eq(hp.state().entries["firefox"].workspaces[1], 3,
+        "a move during startup settling does not overwrite the record")
+    h.handlers["window.close"](w)
+    eq(hp.state().entries["firefox"].workspaces[1], 3,
+        "nor does a close during startup settling")
+
+    h.flush_timers()
+    h.handlers["window.move_to_workspace"](w, { id = 1 })
+    eq(hp.state().entries["firefox"].workspaces[1], 1, "learning resumes once settled")
+
+    -- Placement must keep working while frozen: restoring windows at session start is
+    -- the entire point of the plugin.
+    local w2 = support.window({ class = "discord", address = "0xb", workspace = 1 })
+    local hp2, h2 = fresh({ w2 })
+    DB.record(hp2.state(), "discord", 31, 1000, 8)
+    h2.handlers["window.open_early"](w2)
+    eq(h2.dispatched[1].args.workspace, 31, "placement still happens during startup")
+end
+
+group("shutdown freeze")
+do
+    -- Teardown closes every window, and monitors are removed first, so workspaces
+    -- reflow and windows pile onto whatever is left.
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 3 })
+    local hp, h, path = fresh({ w })
+    h.flush_timers()
+    h.handlers["window.close"](w)
+    h.flush_timers()
+    eq(DB.load(path).entries["firefox"].workspaces[1], 3, "good state recorded while up")
+
+    h.handlers["hyprland.shutdown"]()
+    local collapsed = support.window({ class = "firefox", address = "0xb", workspace = 1 })
+    h.handlers["window.close"](collapsed)
+    h.handlers["window.move_to_workspace"](collapsed, { id = 1 })
+    eq(hp.state().entries["firefox"].workspaces[1], 3,
+        "teardown closes and reflows are not recorded")
+    os.remove(path)
+end
+
+group("shutdown flushes pending writes")
+do
+    -- Saves are debounced, so a shutdown inside the debounce window would lose the
+    -- last thing learned.
+    local w = support.window({ class = "signal", address = "0xa", workspace = 33 })
+    local hp, h, path = fresh({ w })
+    h.flush_timers()
+    h.handlers["window.close"](w)
+    eq(next(DB.load(path).entries), nil, "still pending")
+    h.handlers["hyprland.shutdown"]()
+    eq(DB.load(path).entries["signal"].workspaces[1], 33, "shutdown flushed it to disk")
+    os.remove(path)
+end
+
 group("learning on close (AC-1)")
 do
     -- A window the user never explicitly moved is only ever recorded here.
     local w = support.window({ class = "firefox", address = "0xa", workspace = 3 })
     local hp, h = fresh({ w })
+    h.flush_timers()
     h.handlers["window.close"](w)
     eq(hp.state().entries["firefox"].workspaces[1], 3, "close records the workspace")
 end
@@ -391,11 +458,13 @@ do
 
     local bare = support.window({ class = "kitty", pid = 200, address = "0xa", workspace = 3 })
     local hp, h = fresh({ bare }, { require_cmdline = { "^kitty$" } })
+    h.flush_timers()
     h.handlers["window.close"](bare)
     eq(hp.state().entries["kitty"], nil, "a bare terminal is not remembered")
 
     local btop = support.window({ class = "kitty", pid = 100, address = "0xb", workspace = 21 })
     local hp2, h2 = fresh({ btop }, { require_cmdline = { "^kitty$" } })
+    h2.flush_timers()
     h2.handlers["window.close"](btop)
     eq(hp2.state().entries["kitty\0kitty btop"].workspaces[1], 21,
         "but `kitty btop` is remembered")
@@ -416,6 +485,7 @@ group("persistence is debounced")
 do
     local w = support.window({ class = "firefox", address = "0xa", workspace = 3 })
     local hp, h, path = fresh({ w })
+    h.flush_timers()
     h.handlers["window.close"](w)
     eq(next(DB.load(path).entries), nil, "not written synchronously")
     h.flush_timers()

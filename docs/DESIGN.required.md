@@ -88,8 +88,26 @@ Windows beyond the remembered count get no placement rather than a guess.
 - The workspace reflow triggered by `monitor.added` / `monitor.removed` — the KVM fires
   this on every machine swap, and learning from it would rewrite the entire database.
 
-Working definition: a single focused window, moved on its own, while no monitor event is
-in flight.
+Working definition: a single focused window, moved on its own, while learning is not
+frozen.
+
+Learning is frozen -- placement is not -- during three periods:
+
+- **Session start and config reload.** `setup()` runs during config load, which happens
+  both at boot and on every `hyprctl reload`. In that window the compositor, hyprsplit's
+  workspace reflow, and autostart all move windows around; none of it is user intent.
+  Freezing from `setup()` rather than from the `hyprland.start` event avoids depending on
+  handler ordering against hyprsplit.
+- **Monitor hotplug**, for `monitor_settle_ms` after `monitor.added`/`removed`.
+- **Shutdown, permanently.** This one is the most dangerous: teardown closes *every*
+  window, and monitors are removed first, so workspaces reflow and windows pile onto
+  whatever is left. Recording that would rewrite the entire DB with the collapsing
+  layout, and next boot every window would be restored to it. On `hyprland.shutdown`
+  hyprplace freezes and then flushes, so the last good state is what persists --
+  important because saves are debounced and would otherwise be lost.
+
+Placement deliberately keeps working while frozen: restoring windows at session start is
+the whole point.
 
 ## Storage
 

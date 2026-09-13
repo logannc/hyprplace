@@ -25,9 +25,14 @@ local M = {
     _state = nil,
     -- True while we are dispatching our own move, so the echo is not learned from.
     _guard = false,
-    -- True shortly after a monitor event: hotplug reflows whole workspaces and that is
-    -- not user intent.
+    -- Learning is frozen during unsettled periods -- session start, config reload and
+    -- monitor hotplug -- because the compositor, hyprsplit and autostart all move
+    -- windows then, and none of it is user intent.
     _settling = false,
+    -- Set once the compositor is shutting down. Teardown closes every window, and
+    -- monitors are removed first, so workspaces reflow and windows pile up. Recording
+    -- any of that would overwrite good state with garbage on the way out.
+    _shutdown = false,
     _dirty = false,
     _save_timer = nil,
     _subs = {},
@@ -75,6 +80,20 @@ end
 -- ---------------------------------------------------------------------------
 -- persistence
 
+--- Write immediately if there is anything pending.
+local function flush_save()
+    if not M._dirty then
+        return
+    end
+    M._dirty = false
+    local ok, err = DB.save(M._cfg.db_path, M._state)
+    if not ok then
+        print("[hyprplace] failed to save db: " .. tostring(err))
+    else
+        log("saved %s", M._cfg.db_path)
+    end
+end
+
 local function schedule_save()
     M._dirty = true
     if M._save_timer then
@@ -82,16 +101,7 @@ local function schedule_save()
     end
     M._save_timer = hl.timer(guarded("save", function()
         M._save_timer = nil
-        if not M._dirty then
-            return
-        end
-        M._dirty = false
-        local ok, err = DB.save(M._cfg.db_path, M._state)
-        if not ok then
-            print("[hyprplace] failed to save db: " .. tostring(err))
-        else
-            log("saved %s", M._cfg.db_path)
-        end
+        flush_save()
     end), { timeout = M._cfg.save_debounce_ms, type = "oneshot" })
 end
 
@@ -165,12 +175,18 @@ local function remember(w, ws_id, why)
     schedule_save()
 end
 
+--- Is learning currently frozen? Placement is unaffected -- restoring windows at
+--- session start is the whole point; it is only *recording* that must pause.
+local function frozen()
+    return M._shutdown or M._settling
+end
+
 local function on_move(w, ws)
     if M._guard then
         return -- our own placement echoing back
     end
-    if M._settling then
-        return -- monitor hotplug reflow, not user intent
+    if frozen() then
+        return -- session start, reload or hotplug reflow: not user intent
     end
     -- A deliberate move is a single focused window being moved on its own. Mass moves
     -- (hyprsplit swap_monitors) do not carry focus for every window they touch.
@@ -182,6 +198,11 @@ local function on_move(w, ws)
 end
 
 local function on_close(w)
+    if frozen() then
+        -- Compositor teardown closes every window. Recording then would rewrite the
+        -- whole DB with whatever the collapsing session looked like.
+        return
+    end
     -- Essential for AC-1: a window the user never explicitly moved is only ever
     -- recorded here.
     if w and w.workspace then
@@ -189,11 +210,19 @@ local function on_close(w)
     end
 end
 
-local function begin_settle()
+local function begin_settle(ms)
     M._settling = true
     hl.timer(guarded("settle", function()
         M._settling = false
-    end), { timeout = M._cfg.monitor_settle_ms, type = "oneshot" })
+        log("settled; learning resumed")
+    end), { timeout = ms or M._cfg.monitor_settle_ms, type = "oneshot" })
+end
+
+local function on_shutdown()
+    -- Freeze first, then persist: whatever we know right now is the last good state.
+    M._shutdown = true
+    flush_save()
+    log("shutdown: state frozen and flushed")
 end
 
 -- ---------------------------------------------------------------------------
@@ -218,9 +247,16 @@ function M.setup(user_config)
         hl.on("window.open_early",       guarded("open_early", place)),
         hl.on("window.move_to_workspace", guarded("move", on_move)),
         hl.on("window.close",            guarded("close", on_close)),
-        hl.on("monitor.added",           guarded("monitor.added", begin_settle)),
-        hl.on("monitor.removed",         guarded("monitor.removed", begin_settle)),
+        hl.on("monitor.added",           guarded("monitor.added", function() begin_settle() end)),
+        hl.on("monitor.removed",         guarded("monitor.removed", function() begin_settle() end)),
+        hl.on("hyprland.shutdown",       guarded("shutdown", on_shutdown)),
     }
+
+    -- Start frozen. setup() runs during config load, which happens both at session
+    -- start and on every `hyprctl reload` -- exactly the two moments when windows get
+    -- moved en masse by something other than the user. Relying on the hyprland.start
+    -- event instead would depend on handler ordering against hyprsplit's reflow.
+    begin_settle(M._cfg.startup_settle_ms)
 
     log("ready (db=%s, %d entries)", M._cfg.db_path, (function()
         local n = 0
