@@ -81,6 +81,43 @@ hyprplace currently observes `window.open_early`, `window.move_to_workspace`, an
 - Are `window.urgent`, `window.fullscreen`, or `window.active` informative for placement,
   or just noise?
 
+### Delayed title resolution, and where titles belong
+
+Seven Firefox windows share one pid and one class, so nothing distinguishes them at
+`window.open_early`. Their *titles* do. But the title is not set when the window maps --
+it arrives some time later.
+
+The obvious shape is a per-class "wait for the title to settle" option, parallel to
+`require_cmdline`: for these classes, do not fingerprint at open; observe for N ms and
+use what the title becomes.
+
+What we believe about Firefox specifically, to be confirmed by measurement:
+
+- `browser.sessionstore.restore_on_demand` defaults to true, so restored tabs are lazy
+  and the page does not load until focused.
+- Titles are held in sessionstore separately from page content, and unloaded tabs display
+  their stored titles -- so the window title should resolve without a page load and
+  without focus.
+- Unmeasured: the delay after map, whether background windows resolve as promptly as the
+  focused one, and whether the title changes *again* once the tab really loads.
+
+`hyprplace watch` can measure all three against a real Firefox restart.
+
+**The harder problem is not timing.** Titles are stable across a *restore* but not across
+*usage*: session restore brings the same tabs back, but navigating a window changes its
+title and staleness sets in immediately. `kitty btop` is stable because argv does not
+change while the window lives; "Search Results -- Mozilla Firefox" stops being true on the next
+click.
+
+So titles may belong as a **slot-assignment tiebreaker** rather than as part of the
+identity key: the key stays `firefox`, and the title only decides which of the remembered
+slots a given window claims. A wrong guess then costs a misplaced window instead of a
+poisoned key that never matches again -- the Steam failure mode, which we should not
+reintroduce by another route.
+
+Related: this is the same machinery as "is there more to learn between lifecycle points"
+below, and probably wants to be designed once for both.
+
 ### Keybinds as an escape hatch
 
 The matcher will sometimes be wrong or unable to distinguish two windows. A manual
