@@ -1,0 +1,150 @@
+#!/usr/bin/env lua
+-- hyprplace CLI. Read-only inspection tools.
+--
+-- These NEVER dispatch to a compositor and never mutate anything. `fingerprint` does not
+-- even open the state file. Safe to run against a live session.
+--
+--   hyprplace fingerprint      what hyprplace sees, and what a close would record
+--   hyprplace plan             where each open window would be placed right now
+--   hyprplace db               current learned state, newest first
+--
+--   --instance SIG   target another Hyprland instance (e.g. the test compositor)
+--   --runtime DIR    XDG_RUNTIME_DIR for that instance
+--   --db PATH        state file to read (default: config's db_path)
+
+local script = debug.getinfo(1, "S").source:sub(2)
+local ROOT = script:match("^(.*)/bin/[^/]*$") or "."
+
+table.insert(package.searchers, 2, function(name)
+    local rel = (name == "hyprplace") and "init" or name:match("^hyprplace%.(.+)$")
+    if not rel then return nil end
+    local path = ROOT .. "/" .. rel:gsub("%.", "/") .. ".lua"
+    local chunk = loadfile(path)
+    if chunk then return chunk, path end
+    return "\n\tno file '" .. path .. "'"
+end)
+
+local CLI    = require("hyprplace.cli")
+local Config = require("hyprplace.config")
+local DB     = require("hyprplace.db")
+
+-- ------------------------------------------------------------------------------- args
+
+local function parse_args(argv)
+    local opts, cmd = {}, nil
+    local i = 1
+    while i <= #argv do
+        local a = argv[i]
+        if a == "--instance" or a == "-i" then i = i + 1; opts.instance = argv[i]
+        elseif a == "--runtime"           then i = i + 1; opts.runtime  = argv[i]
+        elseif a == "--db"                then i = i + 1; opts.db       = argv[i]
+        elseif a == "-h" or a == "--help" then opts.help = true
+        elseif not cmd                    then cmd = a
+        else io.stderr:write("unknown argument: " .. a .. "\n"); os.exit(2)
+        end
+        i = i + 1
+    end
+    return cmd, opts
+end
+
+local function usage()
+    io.write([[
+usage: hyprplace <command> [options]
+
+  fingerprint   what hyprplace sees for each open window, and what closing it
+                would record. Reads no state and writes none.
+  plan          where each open window would be placed if it opened right now.
+                Reads the state file; writes nothing.
+  db            current learned state, newest first.
+
+options:
+  -i, --instance SIG   target another Hyprland instance
+      --runtime DIR    XDG_RUNTIME_DIR for that instance
+      --db PATH        state file to read
+
+These tools are read-only: they never dispatch to the compositor.
+]])
+end
+
+local function die(msg)
+    io.stderr:write("hyprplace: " .. msg .. "\n")
+    os.exit(1)
+end
+
+local function windows_or_die(opts)
+    local w, err = CLI.load_windows(opts)
+    if not w then die(err) end
+    return w
+end
+
+-- --------------------------------------------------------------------------- commands
+
+local commands = {}
+
+function commands.fingerprint(cfg, opts)
+    local windows = windows_or_die(opts)
+    local rows = CLI.fingerprint_rows(windows, cfg)
+    io.write(string.format("%d open window(s). No state was read or written.\n\n", #rows))
+    for _, r in ipairs(rows) do
+        io.write(string.format("%-24s ws %-4s pid %-7s %s\n",
+            r.class, tostring(r.ws or "-"), tostring(r.pid or "-"),
+            r.tracked and "" or ("SKIPPED: " .. tostring(r.reason))))
+        io.write(string.format("    title  %s\n", tostring(r.title or "")))
+        io.write(string.format("    key    %s   (tier: %s)\n", CLI.show_key(r.key), r.tier))
+        if r.would_record then
+            io.write(string.format("    record %s -> workspace %d\n",
+                CLI.show_key(r.key), r.would_record))
+        else
+            io.write("    record nothing\n")
+        end
+        io.write("\n")
+    end
+end
+
+function commands.plan(cfg, opts)
+    local windows = windows_or_die(opts)
+    local state = DB.load(cfg.db_path)
+    local rows = CLI.plan_rows(windows, state, cfg)
+    io.write(string.format("state: %s\n\n", cfg.db_path))
+    for _, r in ipairs(rows) do
+        io.write(string.format("%-6s %-24s %s\n", r.outcome, r.class, r.detail))
+        io.write(string.format("       key %s\n", CLI.show_key(r.key)))
+        if r.remembered and #r.remembered > 0 then
+            local ws = {}
+            for _, id in ipairs(r.remembered) do ws[#ws + 1] = tostring(id) end
+            io.write(string.format("       remembered: %s\n", table.concat(ws, ", ")))
+        end
+    end
+end
+
+function commands.db(cfg, _)
+    local state = DB.load(cfg.db_path)
+    local rows = CLI.db_rows(state, cfg, os.time())
+    io.write(string.format("state: %s\n%d entr%s, ttl %d days\n\n",
+        cfg.db_path, #rows, #rows == 1 and "y" or "ies", cfg.ttl_days))
+    for _, r in ipairs(rows) do
+        local ws = {}
+        for _, id in ipairs(r.workspaces) do ws[#ws + 1] = tostring(id) end
+        io.write(string.format("%-44s ws %-12s seen %.1fd ago%s\n",
+            CLI.show_key(r.key), table.concat(ws, ","), r.age_days,
+            r.expires_in and string.format(", expires in %.1fd", r.expires_in) or ""))
+    end
+end
+
+-- ------------------------------------------------------------------------------- main
+
+local cmd, opts = parse_args(arg)
+if opts.help or not cmd then
+    usage()
+    os.exit(cmd and 0 or 2)
+end
+
+local handler = commands[cmd]
+if not handler then
+    io.stderr:write("unknown command: " .. cmd .. "\n\n")
+    usage()
+    os.exit(2)
+end
+
+local cfg = Config.build(opts.db and { db_path = opts.db } or {})
+handler(cfg, opts)

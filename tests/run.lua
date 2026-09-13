@@ -479,6 +479,103 @@ do
     ok(type(err) == "string" and err:match("json"), "returns an error message")
 end
 
+-- ------------------------------------------------------------------------------ cli
+
+local CLI = require("hyprplace.cli")
+
+group("cli.hyprctl_cmd")
+do
+    eq(CLI.hyprctl_cmd({}, "clients"), "hyprctl -j clients", "plain live query")
+    ok(CLI.hyprctl_cmd({ instance = "abc" }, "clients"):match('-i "abc"'), "targets an instance")
+    ok(CLI.hyprctl_cmd({ runtime = "/run/x" }, "clients"):match('^XDG_RUNTIME_DIR="/run/x"'),
+        "sets the runtime dir")
+    ok(not CLI.hyprctl_cmd({}, "clients"):match("dispatch"), "never dispatches")
+end
+
+group("cli.fingerprint_rows")
+do
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function(pid)
+        if pid == 100 then return { "uwsm", "app", "--", "kitty", "btop" } end
+        return { "firefox" }
+    end
+    local cfg = Config.build({ ignore_classes = { "^hyprland%-run$" } })
+
+    local btop = support.window({ class = "kitty", pid = 100, address = "0xa", workspace = 21 })
+    local ff   = support.window({ class = "firefox", pid = 200, address = "0xb", workspace = 1 })
+    local run  = support.window({ class = "hyprland-run", pid = 300, address = "0xc", workspace = 1 })
+    local rows = CLI.fingerprint_rows({ btop, ff, run }, cfg)
+
+    eq(#rows, 3, "one row per window")
+    eq(rows[1].key, "kitty\0kitty btop", "wrapper stripped in the derived key")
+    eq(rows[1].tier, "cmdline", "reports the matching tier")
+    eq(rows[1].would_record, 21, "would record the current workspace")
+    eq(rows[2].tier, "class", "firefox falls back to class tier")
+    ok(not rows[3].tracked, "ignored class is not tracked")
+    eq(rows[3].would_record, nil, "and would record nothing")
+    eq(rows[3].reason, Policy.IGNORED, "with the reason given")
+
+    Identity.read_cmdline = real
+end
+
+group("cli.plan_rows")
+do
+    -- Without this the real /proc is read for these fake pids, and pid 1 (systemd) has a
+    -- multi-argument cmdline, which would push every key into the cmdline tier.
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+
+    local cfg = Config.build({})
+    local state = DB.empty()
+    DB.record(state, "firefox", 3, os.time(), 8)
+
+    local w = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 9 })
+    local rows = CLI.plan_rows({ w }, state, cfg)
+    eq(rows[1].outcome, "move", "would move to the remembered workspace")
+    eq(rows[1].target, 3, "target is the remembered workspace")
+
+    local at_home = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 3 })
+    eq(CLI.plan_rows({ at_home }, state, cfg)[1].outcome, "stay", "already correct -> stay")
+
+    local unknown = support.window({ class = "nope", pid = 1, address = "0xa", workspace = 1 })
+    local r = CLI.plan_rows({ unknown }, state, cfg)[1]
+    eq(r.outcome, "skip", "unknown app -> skip")
+    ok(r.detail:match("no record"), "and says why")
+
+    -- Two windows of one app, one remembered slot: the second has nowhere to go.
+    local a = support.window({ class = "firefox", pid = 1, address = "0xa", workspace = 3 })
+    local b = support.window({ class = "firefox", pid = 2, address = "0xb", workspace = 9 })
+    local rows2 = CLI.plan_rows({ a, b }, state, cfg)
+    eq(rows2[2].outcome, "skip", "second instance has no free remembered slot")
+    ok(rows2[2].detail:match("occupied"), "and says the slots are occupied")
+
+    Identity.read_cmdline = real
+end
+
+group("cli.db_rows")
+do
+    local cfg = Config.build({ ttl_days = 90 })
+    local now = 1000000
+    local state = DB.empty()
+    DB.record(state, "old", 1, now - (10 * 86400), 8)
+    DB.record(state, "new", 2, now, 8)
+    local rows = CLI.db_rows(state, cfg, now)
+    eq(#rows, 2, "one row per entry")
+    eq(rows[1].key, "new", "newest first")
+    ok(math.abs(rows[2].age_days - 10) < 0.01, "age in days")
+    ok(math.abs(rows[2].expires_in - 80) < 0.01, "expiry countdown")
+
+    eq(CLI.db_rows(state, Config.build({ ttl_days = 0 }), now)[1].expires_in, nil,
+        "no expiry shown when ttl is disabled")
+end
+
+group("cli.show_key")
+do
+    eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")
+    eq(CLI.show_key("firefox"), "firefox", "plain key unchanged")
+    eq(CLI.show_key(nil), "(none)", "nil key")
+end
+
 -- --------------------------------------------------------------------------- report
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

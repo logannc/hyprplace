@@ -1,6 +1,6 @@
 LUA ?= lua
 DEST ?= $(HOME)/.config/hypr/hyprplace
-SRC := init.lua config.lua db.lua identity.lua placement.lua json.lua policy.lua
+SRC := init.lua config.lua db.lua identity.lua placement.lua json.lua policy.lua cli.lua
 
 .PHONY: check test all install
 
@@ -8,7 +8,7 @@ all: test
 
 ## check: does every Lua file parse?
 check:
-	@for f in $(SRC) tests/*.lua harness/*.lua; do \
+	@for f in $(SRC) tests/*.lua harness/*.lua bin/hyprplace; do \
 		$(LUA) -e "assert(loadfile('$$f'))" || exit 1; \
 		echo "  ok  $$f"; \
 	done
