@@ -1,0 +1,180 @@
+-- Persistence. The DB is a versioned Lua table, serialized by hand so there is no
+-- JSON dependency and loaded with `load()` in an empty environment.
+--
+-- Shape:
+--   { version = 1, entries = { [key] = { workspaces = {3, 1}, seen = 1789000000 } } }
+--
+-- `workspaces` is ordered most-recent-first. A single-window app has one entry; a
+-- multi-window app accumulates the workspaces its windows were last seen on, and
+-- placement takes the first one not already occupied.
+
+local M = {}
+
+M.VERSION = 1
+
+local function empty()
+    return { version = M.VERSION, entries = {} }
+end
+
+M.empty = empty
+
+--- Escape a string for a Lua long-bracket-free quoted literal.
+local function quote(s)
+    return string.format("%q", s)
+end
+
+--- Serialize state to Lua source.
+---@param state table
+---@return string
+function M.serialize(state)
+    local keys = {}
+    for k in pairs(state.entries or {}) do
+        keys[#keys + 1] = k
+    end
+    table.sort(keys)
+
+    local out = {
+        "-- hyprplace state. Generated file; edits will be overwritten.",
+        "return {",
+        string.format("  version = %d,", state.version or M.VERSION),
+        "  entries = {",
+    }
+    for _, k in ipairs(keys) do
+        local e = state.entries[k]
+        local ws = {}
+        for _, id in ipairs(e.workspaces or {}) do
+            ws[#ws + 1] = tostring(id)
+        end
+        out[#out + 1] = string.format(
+            "    [%s] = { workspaces = { %s }, seen = %d },",
+            quote(k), table.concat(ws, ", "), math.floor(e.seen or 0))
+    end
+    out[#out + 1] = "  },"
+    out[#out + 1] = "}"
+    out[#out + 1] = ""
+    return table.concat(out, "\n")
+end
+
+--- Parse serialized state. Returns an empty DB on any problem rather than throwing --
+--- a corrupt DB must never take the compositor down with it.
+---@param text string|nil
+---@return table
+function M.deserialize(text)
+    if not text or text == "" then
+        return empty()
+    end
+    local chunk = load(text, "hyprplace-db", "t", {})
+    if not chunk then
+        return empty()
+    end
+    local ok, value = pcall(chunk)
+    if not ok or type(value) ~= "table" or type(value.entries) ~= "table" then
+        return empty()
+    end
+    value.version = value.version or M.VERSION
+    return value
+end
+
+--- Drop entries not seen within `ttl_days`.
+---@param state table
+---@param ttl_days number
+---@param now integer
+---@return table state, integer dropped
+function M.prune(state, ttl_days, now)
+    if not ttl_days or ttl_days <= 0 then
+        return state, 0
+    end
+    local cutoff = now - (ttl_days * 86400)
+    local dropped = 0
+    for k, e in pairs(state.entries) do
+        if (e.seen or 0) < cutoff then
+            state.entries[k] = nil
+            dropped = dropped + 1
+        end
+    end
+    return state, dropped
+end
+
+---@param path string
+---@return table
+function M.load(path)
+    local f = io.open(path, "r")
+    if not f then
+        return empty()
+    end
+    local text = f:read("a")
+    f:close()
+    return M.deserialize(text)
+end
+
+--- Create the DB's parent directory. Call once at setup, never on the write path --
+--- os.execute forks a shell, and this runs inside the compositor process.
+---@param path string
+function M.ensure_dir(path)
+    local dir = path:match("^(.*)/[^/]*$")
+    if dir and dir ~= "" then
+        os.execute(string.format("mkdir -p %q", dir))
+    end
+end
+
+--- Write atomically: a crash mid-write must not corrupt the DB.
+--- The parent directory must already exist; see ensure_dir.
+---@param path string
+---@param state table
+---@return boolean ok, string|nil err
+function M.save(path, state)
+    local tmp = path .. ".tmp"
+    local f, err = io.open(tmp, "w")
+    if not f then
+        return false, err
+    end
+    f:write(M.serialize(state))
+    f:close()
+    local ok, rerr = os.rename(tmp, path)
+    if not ok then
+        os.remove(tmp)
+        return false, rerr
+    end
+    return true
+end
+
+--- Record that `key` was last seen on workspace `ws`.
+---
+--- The workspace moves to the front of the list (most recent first), de-duplicated, and
+--- the list is capped at `max_slots`.
+---@param state table
+---@param key string
+---@param ws integer
+---@param now integer
+---@param max_slots integer
+function M.record(state, key, ws, now, max_slots)
+    if not key or not ws then
+        return
+    end
+    local e = state.entries[key]
+    if not e then
+        e = { workspaces = {} }
+        state.entries[key] = e
+    end
+
+    local kept = { ws }
+    for _, id in ipairs(e.workspaces) do
+        if id ~= ws and #kept < (max_slots or 8) then
+            kept[#kept + 1] = id
+        end
+    end
+    e.workspaces = kept
+    e.seen = now
+end
+
+---@param state table
+---@param key string|nil
+---@return table|nil
+function M.lookup(state, key)
+    if not key then
+        return nil
+    end
+    return state.entries[key]
+end
+
+return M
