@@ -211,6 +211,47 @@ do
     eq(Placement.choose({ workspaces = {} }, {}), nil, "empty entry -> no placement")
 end
 
+-- --------------------------------------------------------------------------- policy
+
+local Policy = require("hyprplace.policy")
+
+group("policy.decide")
+do
+    local cfg = Config.build({ ignore_classes = { "^hyprland%-run$" }, require_cmdline = { "^kitty$" } })
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function(pid)
+        if pid == 100 then return { "kitty", "btop" } end
+        return { "kitty" }
+    end
+
+    local function decide(w, all) return Policy.decide(w, all or { w }, cfg) end
+
+    local plain = support.window({ class = "firefox", pid = 1 })
+    local okp, reason = decide(plain)
+    ok(okp, "an ordinary window is tracked")
+    eq(reason, Policy.OK, "with the ok reason")
+
+    local _, r2 = decide(support.window({ class = "", initial_class = "", pid = 1 }))
+    eq(r2, Policy.NO_CLASS, "classless window reports no-class")
+
+    local _, r3 = decide(support.window({ class = "hyprland-run", pid = 1 }))
+    eq(r3, Policy.IGNORED, "ignore_classes reports ignored-class")
+
+    local _, r4 = decide(support.window({ class = "kitty", pid = 200 }))
+    eq(r4, Policy.NEEDS_CMDLINE, "bare terminal reports needs-cmdline")
+
+    local okb = decide(support.window({ class = "kitty", pid = 100 }))
+    ok(okb, "a terminal with a distinguishing cmdline is tracked")
+
+    ok(Policy.EXPLAIN[Policy.NEEDS_CMDLINE], "every reason has a human explanation")
+
+    eq(Policy.class_of(support.window({ class = "", initial_class = "Foo" })), "Foo",
+        "falls back to initial_class")
+    eq(Policy.class_of(nil), nil, "nil window has no class")
+
+    Identity.read_cmdline = real
+end
+
 -- ----------------------------------------------------------------- handlers via hl
 
 local function fresh(windows, user_cfg)

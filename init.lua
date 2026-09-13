@@ -18,6 +18,7 @@ local Config    = require("hyprplace.config")
 local DB        = require("hyprplace.db")
 local Identity  = require("hyprplace.identity")
 local Placement = require("hyprplace.placement")
+local Policy    = require("hyprplace.policy")
 
 local M = {
     _cfg   = nil,
@@ -55,30 +56,13 @@ end
 -- policy
 
 --- Should hyprplace have anything to do with this window at all?
+--- Shared with the CLI tools; see policy.lua.
 ---@param w table
 ---@param windows table[]
 ---@return boolean
 local function tracked(w, windows)
-    if not w then
-        return false
-    end
-    local class = w.class
-    if not class or class == "" then
-        class = w.initial_class
-    end
-    if not class or class == "" then
-        return false
-    end
-    if Config.matches(class, M._cfg.ignore_classes) then
-        return false
-    end
-    -- Classes whose windows only matter when they carry a distinguishing cmdline:
-    -- a bare terminal is a fresh shell, `kitty btop` is a persistent thing.
-    if Config.matches(class, M._cfg.require_cmdline)
-        and not Identity.has_cmdline_identity(w, windows) then
-        return false
-    end
-    return true
+    local ok = Policy.decide(w, windows, M._cfg)
+    return ok
 end
 
 local function key_fn(windows)
