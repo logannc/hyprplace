@@ -96,6 +96,9 @@ in flight.
 - Path: `~/.local/state/hyprplace/db.lua`, overridable via `HYPRPLACE_DB` (tests).
 - Format: a versioned Lua table, loaded with `load()` — no JSON dependency.
 - Writes are debounced and atomic (`tmp` + `os.rename`) so a crash cannot corrupt it.
+- Entries carry a `seen` timestamp and expire after `ttl_days`. Placement refreshes
+  `seen` (recency only, never the slot order), so an app in regular use does not expire
+  just because it is never explicitly moved.
 - Recorded on deliberate move and on window close. `hyprland.shutdown` alone is
   insufficient — it does not fire on a hard crash.
 

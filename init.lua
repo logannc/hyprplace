@@ -136,6 +136,12 @@ local function place(w)
         log("every remembered workspace for %q is taken", tostring(key))
         return
     end
+
+    -- Acting on an entry is evidence it is still in use: refresh recency so an app you
+    -- keep reopening never expires, even if you never explicitly move it.
+    DB.touch(M._state, key, os.time())
+    schedule_save()
+
     if w.workspace and w.workspace.id == target then
         return
     end

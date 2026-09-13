@@ -167,6 +167,25 @@ function M.record(state, key, ws, now, max_slots)
     e.seen = now
 end
 
+--- Refresh an entry's recency without disturbing its workspace order.
+---
+--- Used when placement acts on an entry: continued use is evidence the entry is still
+--- wanted, so it should not expire. Reordering here would be wrong -- the slot order
+--- encodes which workspace each of an app's windows goes to, and placement picking
+--- slot 2 (because slot 1 was taken) must not promote slot 2 to the front.
+---@param state table
+---@param key string|nil
+---@param now integer
+---@return boolean touched
+function M.touch(state, key, now)
+    local e = key and state.entries[key]
+    if not e then
+        return false
+    end
+    e.seen = now
+    return true
+end
+
 ---@param state table
 ---@param key string|nil
 ---@return table|nil

@@ -146,6 +146,18 @@ do
     eq(#s.entries["k"].workspaces, 3, "capped at max_slots")
 end
 
+group("db.touch")
+do
+    local s = DB.empty()
+    DB.record(s, "k", 5, 100, 8)
+    DB.record(s, "k", 3, 101, 8)   -- order is now {3, 5}
+    ok(DB.touch(s, "k", 999), "touch reports it found the entry")
+    eq(s.entries["k"].seen, 999, "seen is refreshed")
+    eq(s.entries["k"].workspaces[1], 3, "slot order is not disturbed")
+    eq(s.entries["k"].workspaces[2], 5, "second slot is not disturbed")
+    ok(not DB.touch(s, "missing", 999), "touching an absent key reports false")
+end
+
 group("db.prune")
 do
     local now = 1000000
@@ -258,16 +270,41 @@ group("the self-move guard")
 do
     -- The compositor echoes our own move back synchronously; without the guard we would
     -- learn from our own placement. This is the measured behaviour, replayed.
-    local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
-    local hp, h = fresh({ w })
+    --
+    -- The entry is {5, 3} with another window already on 5, so placement picks 3. If the
+    -- echo were learned, DB.record would promote 3 to the front and the order would flip
+    -- to {3, 5}. Order is therefore the discriminator -- `seen` is not, because placement
+    -- legitimately refreshes it.
+    local w     = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    local other = support.window({ class = "firefox", address = "0xb", workspace = 5 })
+    local hp, h = fresh({ w, other })
     h.echo_move = true
     DB.record(hp.state(), "firefox", 3, 1000, 8)
-    local before = hp.state().entries["firefox"].seen
+    DB.record(hp.state(), "firefox", 5, 1001, 8)   -- order {5, 3}
 
     h.handlers["window.open_early"](w)
-    eq(hp.state().entries["firefox"].seen, before,
-        "the echo of our own move is not learned from")
-    eq(hp.state().entries["firefox"].workspaces[1], 3, "record is unchanged")
+    eq(h.dispatched[1].args.workspace, 3, "placed on the first free remembered slot")
+    eq(hp.state().entries["firefox"].workspaces[1], 5,
+        "the echo of our own move did not reorder the slots")
+    eq(hp.state().entries["firefox"].workspaces[2], 3, "second slot still second")
+end
+
+group("placement refreshes recency")
+do
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    local hp, h = fresh({ w })
+    DB.record(hp.state(), "firefox", 3, 1000, 8)
+    h.handlers["window.open_early"](w)
+    ok(hp.state().entries["firefox"].seen > 1000,
+        "an app you keep reopening does not expire, even if never moved")
+
+    -- Also refreshed when the window is already where it belongs and no move is needed.
+    local w2 = support.window({ class = "discord", address = "0xb", workspace = 3 })
+    local hp2, h2 = fresh({ w2 })
+    DB.record(hp2.state(), "discord", 3, 1000, 8)
+    h2.handlers["window.open_early"](w2)
+    eq(#h2.dispatched, 0, "no move needed")
+    ok(hp2.state().entries["discord"].seen > 1000, "but recency still refreshed")
 end
 
 group("learning from real moves")

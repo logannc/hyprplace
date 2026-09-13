@@ -19,9 +19,11 @@ State must not grow unbounded. A window seen once a year ago is not useful infor
 
 - MVP: every entry carries a `seen` timestamp; entries older than `ttl_days` are dropped
   when the DB is loaded.
-- Open: what the default TTL should be, whether it should be per-entry-class rather than
-  global, and whether repeated placement should refresh `seen` (recency) or only explicit
-  user moves should (intent).
+- **Decided:** placement refreshes `seen`. Acting on an entry is evidence it is still in
+  use, so an app you keep reopening never expires even if you never explicitly move it.
+  The refresh updates recency only; it does not reorder the workspace slots.
+- Open: what the default TTL should be, and whether it should be per-class rather than
+  global.
 
 ### Which windows are worth remembering at all
 
