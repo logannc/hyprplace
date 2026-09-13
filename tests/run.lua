@@ -162,6 +162,19 @@ do
     eq(next(DB.deserialize("os.exit(1)").entries), nil, "no ambient access in the sandbox")
 end
 
+group("max_slots is above realistic window counts")
+do
+    -- Nine Firefox windows in a live session were truncated to eight by the old cap,
+    -- dropping workspace 32 -- the highest id, which under hyprsplit means the last
+    -- monitor.
+    local cfg = Config.build({})
+    local nine = { 1, 2, 3, 3, 3, 4, 4, 5, 32 }
+    local s = DB.empty()
+    DB.observe(s, "firefox", nine, 100, cfg.max_slots)
+    eq(#s.entries["firefox"].workspaces, 9, "all nine windows survive the default cap")
+    eq(s.entries["firefox"].workspaces[9], 32, "including the one on the last monitor")
+end
+
 group("db.observe")
 do
     local s = DB.empty()
