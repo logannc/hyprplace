@@ -1,6 +1,7 @@
 # hyprplace — Design
 
-Status: **pre-implementation**. Requirements and dev environment settled; no plugin code written yet.
+Status: **implemented and unit-tested, never run inside a compositor.** See the Status
+section of ../CLAUDE.md for what exists and what is unverified.
 Target: Hyprland **0.56.2** (Lua config API, `hl.*`).
 
 ## Problem

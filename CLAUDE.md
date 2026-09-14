@@ -3,8 +3,32 @@
 A Hyprland Lua plugin that remembers which workspace each app lives on and puts its
 windows back there when they open.
 
-**Status: pre-implementation.** Requirements and dev environment are settled and
-documented; no plugin code exists yet.
+## Status
+
+**Implemented and unit-tested; never yet run inside a compositor.** That is the single
+most important fact here: 262 tests pass, and none of them prove the plugin works,
+because none of them involve a real compositor.
+
+| | |
+|---|---|
+| Plugin | `init.lua` + `config` `db` `identity` `placement` `policy` `learn` |
+| Tools | `bin/hyprplace` — `fingerprint` `plan` `db` `diff` `prune` `watch` |
+| Installer | `./install.lua install \| uninstall \| status` |
+| Test harness | `./harness/compositor.sh start\|stop\|cmd\|repl` |
+| Tests | `make test` (262, no compositor needed); `make check` parses only |
+
+**Next step is MVP testing**: install it, reload Hyprland, then observe with
+`hyprplace watch` and `hyprplace diff` rather than trusting it. Three assumptions are
+unverified and a real session will settle all three immediately — they are listed under
+Constraints and risks in DESIGN.required.md:
+
+- whether `w.active == false` really does filter hyprsplit's mass moves,
+- whether `hyprland.shutdown` fires before the window-close storm,
+- whether XWayland windows have a `class` at `window.open_early`.
+
+**Pending decision:** `require_cmdline = { "^kitty$" }` would stop bare terminals being
+tracked while keeping `kitty btop`. One line; deliberately not enabled, because the
+defaults are the user's call (see FUTURE.md).
 
 ## Required reading
 

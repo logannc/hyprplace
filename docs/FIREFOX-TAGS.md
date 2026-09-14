@@ -424,20 +424,37 @@ and the abandoned key expires under the TTL. No migration logic, no user action 
 placing the window once. That is the simplest option the handoff suggests, and it needs
 no new mechanism.
 
+## Decisions
+
+**The scope increase is accepted.** This adds a signed browser extension, an AMO
+account, a release pipeline, and an installer path wanting root. That is a large
+expansion for a workspace-placement plugin, the concern is real, and the capability is
+judged to outweigh it. Conditions:
+
+- **Separable.** The extension is its own component with a documented contract, not
+  something entangled with the plugin. The plugin side is only the matching rule and the
+  deferral; keep that boundary crisp.
+- **Clearly indicated.** Never silent, never a side effect of installing hyprplace.
+- **Root is explained, not just requested.** The extension install path needs root to
+  write `/etc/firefox/policies/policies.json`. Both install *and* uninstall must say
+  plainly what they are touching and why, before doing it. `install.lua` otherwise
+  touches only the user's own files, so this is a categorically different step and must
+  be opt-in and separately invoked -- never part of the default install.
+
+**Sequencing: this comes after its prerequisites.** The deferred-decision machinery
+(hold a window, watch for a later title, act or time out) must exist first. Both this
+and title sampling depend on it. Do not start the extension before that lands.
+
+**The timeout will be measured, not guessed.** The whole design rests on the preface
+reappearing before the plugin stops waiting. `hyprplace watch` can measure the real
+delay on a genuine Firefox restart, and the timeout should be tuned from that
+measurement -- across a cold boot as well as a warm restart, since session restore has
+more to do at boot.
+
 ## Open questions this raises for us
 
-- **Scope.** This adds a signed browser extension, an AMO account, a release pipeline,
-  and an installer path that wants root to write `/etc/firefox/policies/policies.json`.
-  That is a large expansion for a workspace-placement plugin. Separate repo with a
-  documented contract? Optional companion? The plugin side is only the matching rule and
-  the deferral, and it is worth keeping that boundary crisp.
-- **The installer.** `install.lua` currently touches only the user's own files. Anything
-  needing root is a different category and should be a separate, clearly-flagged,
-  opt-in step -- never part of the default install.
-- **Does the tag survive what we think it survives?** The contract assumes the preface
-  reappears on restored windows before the plugin gives up waiting. The timeout is the
-  whole risk, and `hyprplace watch` can measure the real delay on a genuine restart
-  before any of this is built.
+- **Where the extension lives.** Separate repo, or a subdirectory here? Separable does
+  not have to mean separate repository, but the release pipelines differ.
 - **`--name` for `app_id`** is noted for multiple profiles, but it is interesting more
   broadly: an app launched with a distinct `app_id` is trivially distinguishable, which
   may be a cheaper answer than fingerprinting for other apps too.

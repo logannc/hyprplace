@@ -49,6 +49,19 @@ To remove everything: `git worktree remove ~/workspace/Hyprland-v0.56.2`.
 
 ## Running the contained compositor
 
+Use the harness script; it applies every rail below and refuses to address the live
+instance:
+
+```sh
+./harness/compositor.sh start                 # launches, invisible, isolated
+./harness/compositor.sh cmd output create headless HEADLESS-1
+./harness/compositor.sh repl 'return #hl.get_monitors()'
+./harness/compositor.sh stop                  # graceful, then verified, then cleaned up
+```
+
+`CONFIG=<file>` selects the config (default `harness/probe.lua`). The rest of this
+section documents what the script does, and is the reference if it ever needs changing.
+
 ```sh
 TESTDIR=/run/user/$(id -u)/hpt
 mkdir -p $TESTDIR && chmod 700 $TESTDIR
