@@ -83,6 +83,13 @@ hyprplace currently observes `window.open_early`, `window.move_to_workspace`, an
 
 ### Delayed title resolution, and where titles belong
 
+> For Firefox specifically there is a better answer than heuristics: a WebExtension that
+> publishes a stable per-window tag through the title. See
+> [FIREFOX-TAGS.md](FIREFOX-TAGS.md). It does not remove the need for this section --
+> title heuristics remain the fallback for every other multi-window app -- but it does
+> mean Firefox should not be the app this design is tuned around. The two share the
+> "observe after open" machinery described below, which should be built once for both.
+
 Seven Firefox windows share one pid and one class, so nothing distinguishes them at
 `window.open_early`. Their *titles* do. But the title is not set when the window maps --
 it arrives some time later.

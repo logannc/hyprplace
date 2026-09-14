@@ -19,8 +19,14 @@ that are not obvious from the code.
   containment contract.
 
 Docs *without* the `.required` marker are optional — read them when the task makes them
-relevant. Currently: [docs/FUTURE.md](docs/FUTURE.md) (near-term work and the post-MVP
-feature exploration backlog; **do not** pull this work forward into the MVP). When adding a doc, mark it `.required.md` only if every agent must read it to
+relevant. Currently:
+
+- [docs/FUTURE.md](docs/FUTURE.md) — near-term work and the post-MVP feature exploration
+  backlog.
+- [docs/FIREFOX-TAGS.md](docs/FIREFOX-TAGS.md) — design for a WebExtension that gives
+  Firefox windows stable identities, plus what that implies for the plugin.
+
+**Do not** pull work from either forward into the MVP. When adding a doc, mark it `.required.md` only if every agent must read it to
 work safely here.
 
 The decisions in DESIGN.required.md were made deliberately, and several of them reverse an
