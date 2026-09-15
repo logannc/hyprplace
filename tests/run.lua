@@ -662,6 +662,34 @@ do
     eq(Tag.of("[Draft] Re: budget"), "Draft", "a bracketed word IS matched -- see note")
 end
 
+group("the tag format matches the extension")
+do
+    -- The alphabet is written twice, in two languages: TAG_RE in the extension's
+    -- background.js and the pattern in tag.lua. They must agree, or the plugin will
+    -- either reject tags the extension issues or accept tags it never would.
+    local f = assert(io.open(ROOT .. "/extension/background.js", "r"))
+    local js = f:read("a")
+    f:close()
+
+    local alphabet, max = js:match("TAG_RE%s*=%s*/%^%[([^%]]+)%]{1,(%d+)}%$/")
+    ok(alphabet ~= nil, "found TAG_RE in background.js")
+    eq(alphabet, "A-Za-z0-9_-", "the extension's alphabet is the one tag.lua reads")
+    eq(tonumber(max), Tag.MAX_LEN, "and the length bound matches Tag.MAX_LEN")
+
+    -- Sampled from the extension's alphabet rather than asserted about the pattern
+    -- string, so a rewrite of either side that changes behaviour still fails.
+    for _, ch in ipairs({ "a", "Z", "7", "_", "-" }) do
+        eq(Tag.of("[x" .. ch .. "] t"), "x" .. ch, ch .. " is accepted by both")
+    end
+    for _, ch in ipairs({ " ", ".", "/", "]", "%" }) do
+        eq(Tag.of("[x" .. ch .. "] t"), nil, "'" .. ch .. "' is accepted by neither")
+    end
+
+    -- The preface format the extension writes, read back by the plugin.
+    eq(Tag.of("[" .. string.rep("0", 8) .. "] Inbox - Mozilla Firefox"),
+        string.rep("0", 8), "the default 8-hex-character tag round trips")
+end
+
 group("tag.strip")
 do
     eq(Tag.strip("[work] Inbox"), "Inbox", "the preface is removed")

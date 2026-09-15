@@ -13,6 +13,7 @@ because none of them involve a real compositor.
 |---|---|
 | Plugin | `init.lua` + `config` `db` `identity` `placement` `policy` `learn` `tag` `cache` |
 | Tools | `bin/hyprplace` — `fingerprint` `plan` `db` `diff` `prune` `watch` |
+| Extension | `extension/` — hypr-tags, unsigned, dev only. See `extension/README.md` |
 | Installer | `./install.lua install \| uninstall \| status` |
 | Test harness | `./harness/compositor.sh start\|stop\|cmd\|repl` |
 | Tests | `make test` (262, no compositor needed); `make check` parses only |

@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Window tag</title>
+<style>
+  body { font: 13px system-ui, sans-serif; padding: 10px; min-width: 220px; }
+  input { width: 100%; box-sizing: border-box; margin: 6px 0; }
+  #err { color: #c00; min-height: 1em; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1c1b22; color: #fbfbfe; }
+    input { background: #2b2a33; color: #fbfbfe; border: 1px solid #52525e; }
+    #err { color: #ff9aa2; }
+  }
+</style>
+<div>Current tag: <code id="cur">…</code></div>
+<input id="tag" placeholder="new tag" maxlength="32" spellcheck="false">
+<button id="save">Rename</button>
+<div id="err"></div>
+<script src="popup.js"></script>
