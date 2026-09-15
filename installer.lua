@@ -10,6 +10,7 @@ local M = {}
 M.MODULES = {
     "init.lua", "config.lua", "db.lua", "identity.lua",
     "placement.lua", "policy.lua", "learn.lua", "json.lua", "cli.lua",
+    "tag.lua",
 }
 
 -- The block is nested. Everything between BEGIN and END belongs to the installer and

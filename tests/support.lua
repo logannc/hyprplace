@@ -37,7 +37,13 @@ function support.fake_hl(windows)
 
     function h.on(event, cb)
         h.handlers[event] = cb
-        return { remove = function() end, is_active = function() return true end }
+        -- remove() really unsubscribes: the deferral machinery holds the window.title
+        -- subscription only while something is pending, and that lifecycle is worth
+        -- being able to assert on.
+        return {
+            remove    = function() h.handlers[event] = nil end,
+            is_active = function() return h.handlers[event] ~= nil end,
+        }
     end
 
     function h.get_windows()
@@ -45,12 +51,22 @@ function support.fake_hl(windows)
     end
 
     function h.timer(cb, opts)
-        h.timers[#h.timers + 1] = { cb = cb, opts = opts }
-        return { set_enabled = function() end }
+        local t = { cb = cb, opts = opts or {}, enabled = true }
+        function t:set_enabled(v) self.enabled = v ~= false end
+        function t:is_enabled() return self.enabled end
+        function t:set_timeout(_) end
+        h.timers[#h.timers + 1] = t
+        return t
     end
 
     function h.dispatch(payload)
         h.dispatched[#h.dispatched + 1] = payload
+        -- A move really moves the window, so a later decision sees the new layout.
+        -- Without this, placing several windows of one app in a row would compute
+        -- every slot against the pre-move world and send them all to the same place.
+        if payload and payload.kind == "move" and payload.args.window then
+            payload.args.window.workspace = { id = payload.args.workspace }
+        end
         -- The real compositor echoes our move back synchronously, inside this call.
         -- Replaying that is the whole point: it is what the guard flag defends against.
         if payload and payload.kind == "move" and h.echo_move then
@@ -67,12 +83,26 @@ function support.fake_hl(windows)
         },
     }
 
-    --- Run every pending timer callback and clear the queue.
+    --- Run every enabled timer callback once.
+    ---
+    --- Oneshots are consumed; repeating timers stay, so a sweep can be ticked by
+    --- calling this again. Disabled timers are kept but not run -- that is how the
+    --- deferral sweep goes quiet without being destroyed. The queue is swapped before
+    --- the callbacks run, so timers a callback creates land in the next round rather
+    --- than firing immediately.
     function h.flush_timers()
         local pending = h.timers
-        h.timers = {}
+        local keep = {}
         for _, t in ipairs(pending) do
-            t.cb()
+            if (t.opts.type or "oneshot") == "repeat" then
+                keep[#keep + 1] = t
+            end
+        end
+        h.timers = keep
+        for _, t in ipairs(pending) do
+            if t.enabled then
+                t.cb()
+            end
         end
     end
 

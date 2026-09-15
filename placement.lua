@@ -5,9 +5,11 @@
 -- its verdict and the tools render it, so `hyprplace plan` and `hyprplace watch` cannot
 -- drift from what actually happens.
 
+local Config   = require("hyprplace.config")
 local DB       = require("hyprplace.db")
 local Identity = require("hyprplace.identity")
 local Policy   = require("hyprplace.policy")
+local Tag      = require("hyprplace.tag")
 
 local M = {}
 
@@ -62,18 +64,42 @@ function M.choose(entry, counts)
     return nil
 end
 
+--- Is this window's identity still incomplete, such that deciding now would decide on
+--- the wrong thing?
+---
+--- Only one case today: a class listed in `defer_classes` whose title carries no tag.
+--- The tag arrives in a title event some time after the window maps, so the snapshot at
+--- `window.open_early` is not yet the window's identity.
+---@param w table
+---@param cfg table
+---@return boolean
+function M.incomplete(w, cfg)
+    local class = Policy.class_of(w)
+    if not class or not Config.matches(class, cfg.defer_classes) then
+        return false
+    end
+    return Tag.of(w.title) == nil
+end
+
 --- The placement verdict for one window.
 ---
 --- outcome is one of:
 ---   skip   hyprplace does nothing and Hyprland decides (AC-3)
 ---   stay   the window is already on the workspace it belongs to
 ---   move   the window should be moved to `target`
+---   defer  the identity is not knowable yet; wait and decide again
+---
+--- `opts.may_defer` is true by default, so the tools show the same "defer" a running
+--- plugin would choose. The plugin passes false once the deadline has passed, which
+--- turns the same call into the decision it would have made without deferral at all.
 ---@param w table
 ---@param windows table[]
 ---@param state table
 ---@param cfg table
+---@param opts table|nil
 ---@return table
-function M.decide(w, windows, state, cfg)
+function M.decide(w, windows, state, cfg, opts)
+    local may_defer = not opts or opts.may_defer ~= false
     local tracked, reason = Policy.decide(w, windows, cfg)
     local key = Identity.key_for(w, windows, cfg)
     local verdict = {
@@ -83,11 +109,21 @@ function M.decide(w, windows, state, cfg)
         ws      = w.workspace and w.workspace.id,
         address = w.address,
         class   = Policy.class_of(w) or "(none)",
+        tag     = Tag.of(w.title),
     }
 
     if not tracked then
         verdict.outcome = "skip"
         verdict.detail  = Policy.EXPLAIN[reason] or reason
+        return verdict
+    end
+
+    -- Before the DB is consulted: looking up a key derived from an identity that has
+    -- not arrived yet would place the window on whatever the incomplete key remembers.
+    if may_defer and M.incomplete(w, cfg) then
+        verdict.outcome = "defer"
+        verdict.detail  = string.format("waiting up to %dms for a window tag",
+            cfg.defer_timeout_ms or 0)
         return verdict
     end
 

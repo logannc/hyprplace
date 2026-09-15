@@ -20,6 +20,7 @@ local Identity  = require("hyprplace.identity")
 local Learn     = require("hyprplace.learn")
 local Placement = require("hyprplace.placement")
 local Policy    = require("hyprplace.policy")
+local Tag       = require("hyprplace.tag")
 
 local M = {
     _cfg   = nil,
@@ -37,6 +38,18 @@ local M = {
     _dirty = false,
     _save_timer = nil,
     _subs = {},
+    -- Windows whose identity was not knowable at open, awaiting a title or a deadline.
+    -- Keyed by address, never by window object: the window may be gone by the time we
+    -- look again, so it is re-resolved from hl.get_windows() at the moment we act.
+    _pending = {},
+    -- One repeating sweep for every pending window, disabled while none are pending.
+    -- Per-window oneshots would be simpler but cannot be retracted -- HL.Timer has no
+    -- cancel -- and a timer that fires after the user has moved the window would break
+    -- AC-4. Deadlines are counted in sweep ticks so no wall clock is needed.
+    _sweep = nil,
+    -- window.title fires for every title change of every window, so the subscription is
+    -- held only while something is actually pending.
+    _title_sub = nil,
 }
 
 -- ---------------------------------------------------------------------------
@@ -109,13 +122,22 @@ end
 -- ---------------------------------------------------------------------------
 -- placement
 
-local function place(w)
-    if not M._cfg then
-        return
+--- The window with this address, as the compositor sees it right now.
+---@param windows table[]
+---@param address string
+---@return table|nil
+local function by_address(windows, address)
+    for _, w in ipairs(windows or {}) do
+        if w.address == address then
+            return w
+        end
     end
-    local windows = hl.get_windows()
-    local verdict = Placement.decide(w, windows, M._state, M._cfg)
+    return nil
+end
 
+--- Carry out a verdict. Split from the decision so the deferred path, which decides at
+--- a different moment, acts through exactly the same code.
+local function apply(w, verdict)
     if verdict.outcome == "skip" then
         log("skip %s: %s", tostring(verdict.key), verdict.detail)
         return
@@ -143,6 +165,124 @@ local function place(w)
     if not ok then
         print("[hyprplace] move failed: " .. tostring(err))
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- deferred placement
+--
+-- Some windows cannot be identified when they open. A Firefox window's tag arrives in a
+-- title event some time after the window maps, so deciding at window.open_early would
+-- decide on an identity that is not there yet. Such a window is held: hyprplace watches
+-- for the title, and acts when the identity completes or when the deadline passes.
+--
+-- AC-4 is what constrains the whole mechanism. hyprplace may place a window only while
+-- the user has not touched it, so any deliberate move -- or the window closing -- drops
+-- it from the pending set for good.
+
+local sweep, on_title
+
+--- Stop sweeping and stop listening for titles once nothing is waiting.
+local function idle_if_empty()
+    if next(M._pending) then
+        return
+    end
+    if M._sweep then
+        M._sweep:set_enabled(false)
+    end
+    if M._title_sub then
+        M._title_sub:remove()
+        M._title_sub = nil
+    end
+end
+
+local function defer(w)
+    local address = w.address
+    if not address or M._pending[address] then
+        return
+    end
+    local poll = math.max(1, M._cfg.defer_poll_ms or 250)
+    local ticks = math.max(1, math.ceil((M._cfg.defer_timeout_ms or 0) / poll))
+    M._pending[address] = { ticks = ticks }
+
+    if not M._sweep then
+        M._sweep = hl.timer(guarded("defer-sweep", function() sweep() end),
+            { timeout = poll, type = "repeat" })
+    else
+        M._sweep:set_enabled(true)
+    end
+    if not M._title_sub then
+        M._title_sub = hl.on("window.title", guarded("title", function(w2) on_title(w2) end))
+    end
+end
+
+--- Drop a window from the pending set. Called whenever the user acts on it.
+local function cancel_pending(address, why)
+    if not address or not M._pending[address] then
+        return
+    end
+    M._pending[address] = nil
+    log("deferral cancelled (%s)", why)
+    idle_if_empty()
+end
+
+--- Decide for a window whose deferral is over, one way or the other.
+local function decide_now(address, may_defer, why)
+    local windows = hl.get_windows()
+    local w = by_address(windows, address)
+    if not w then
+        return -- closed while we waited
+    end
+    local verdict = Placement.decide(w, windows, M._state, M._cfg, { may_defer = may_defer })
+    if verdict.outcome == "defer" then
+        return -- still incomplete; keep waiting
+    end
+    M._pending[address] = nil
+    log("deferred decision (%s): %s", why, verdict.detail)
+    apply(w, verdict)
+    idle_if_empty()
+end
+
+--- Tick every pending deadline; decide for the ones that ran out.
+function sweep()
+    if M._shutdown then
+        M._pending = {}
+        idle_if_empty()
+        return
+    end
+    for address, p in pairs(M._pending) do
+        p.ticks = p.ticks - 1
+        if p.ticks <= 0 then
+            -- Deadline reached: decide on what is known, which is exactly what would
+            -- have happened without deferral.
+            decide_now(address, false, "timed out")
+        end
+    end
+    idle_if_empty()
+end
+
+--- A pending window's title changed; its identity may now be complete.
+---@param w table|nil
+function on_title(w)
+    local address = w and w.address
+    if not address or not M._pending[address] then
+        return -- not waiting on this one; the common case, kept cheap
+    end
+    decide_now(address, true, "tag arrived")
+end
+
+--- Place a window, or start waiting if it cannot be identified yet.
+local function place(w)
+    if not M._cfg then
+        return
+    end
+    local windows = hl.get_windows()
+    local verdict = Placement.decide(w, windows, M._state, M._cfg)
+    if verdict.outcome == "defer" then
+        log("defer %s: %s", tostring(verdict.class), verdict.detail)
+        defer(w)
+        return
+    end
+    apply(w, verdict)
 end
 
 -- ---------------------------------------------------------------------------
@@ -185,19 +325,24 @@ local function on_move(w, ws)
     if M._guard then
         return -- our own placement echoing back
     end
-    if frozen() then
-        return -- session start, reload or hotplug reflow: not user intent
-    end
     -- A deliberate move is a single focused window being moved on its own. Mass moves
     -- (hyprsplit swap_monitors) do not carry focus for every window they touch.
     if w and w.active == false then
         return
+    end
+    -- The user has acted on this window, so hyprplace must not place it afterwards
+    -- (AC-4). Cancelled even while learning is frozen: the freeze exists to stop us
+    -- *recording* a startup reflow, not to license overriding the user during it.
+    cancel_pending(w and w.address, "user moved the window")
+    if frozen() then
+        return -- session start, reload or hotplug reflow: not user intent
     end
     local id = ws and (type(ws) == "table" and ws.id or ws) or (w.workspace and w.workspace.id)
     remember(w, id, "move")
 end
 
 local function on_close(w)
+    cancel_pending(w and w.address, "window closed")
     if frozen() then
         -- Compositor teardown closes every window. Recording then would rewrite the
         -- whole DB with whatever the collapsing session looked like.
@@ -221,6 +366,8 @@ end
 local function on_shutdown()
     -- Freeze first, then persist: whatever we know right now is the last good state.
     M._shutdown = true
+    M._pending = {}
+    idle_if_empty()
     flush_save()
     log("shutdown: state frozen and flushed")
 end
@@ -242,6 +389,13 @@ function M.setup(user_config)
         log("pruned %d expired entries", dropped)
         schedule_save()
     end
+
+    -- Reset explicitly rather than relying on a fresh VM: `hyprctl reload` does give
+    -- us one, but setup() is also the seam the tests drive, and a leaked pending set
+    -- would make them depend on each other.
+    M._pending   = {}
+    M._sweep     = nil
+    M._title_sub = nil
 
     M._subs = {
         hl.on("window.open_early",       guarded("open_early", place)),

@@ -48,6 +48,35 @@ function M.defaults()
         -- positional arguments.
         max_cmdline_len = 120,
 
+        -- Lua patterns matched against class:lower(). For these classes, placement
+        -- waits: the window's identity is not knowable at window.open_early, because
+        -- it arrives in a later title event.
+        --
+        -- The case this exists for is Firefox. Every Firefox window shares one class
+        -- and one pid, so nothing tells them apart at open; the hypr-tags extension
+        -- publishes a per-window tag through the title, and that tag shows up some
+        -- time after the window maps. See docs/FIREFOX-TAGS.md.
+        --
+        -- Empty by default, which makes deferral a no-op. Without the extension there
+        -- is no tag to wait for, so enabling this only delays the same decision.
+        --
+        --   defer_classes = { "^firefox$" },
+        defer_classes = {},
+
+        -- How long to wait for a deferred window's identity before giving up and
+        -- deciding on what is known. On timeout the window is placed exactly as it
+        -- would have been without deferral, so the cost of waiting too long is a late
+        -- placement, not a wrong one.
+        --
+        -- Tune against a real session: the wait must outlast the extension applying
+        -- its title preface after a Firefox restart, which is slowest at cold boot.
+        defer_timeout_ms = 3000,
+
+        -- How often the pending set is swept for expired deadlines. Also the
+        -- granularity of defer_timeout_ms. The sweep only runs while something is
+        -- actually pending.
+        defer_poll_ms = 250,
+
         -- Milliseconds after a monitor event during which moves are not learned from.
         -- A KVM swap or hotplug reflows whole workspaces; that is not user intent.
         monitor_settle_ms = 2000,

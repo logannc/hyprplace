@@ -74,6 +74,34 @@ return {
     -- great many positional arguments.
     max_cmdline_len = 120,
 
+    -- Lua patterns matched against the window class, lowercased. For these classes
+    -- placement waits instead of deciding at open, because the window's identity is
+    -- not knowable that early -- it arrives in a later title event.
+    --
+    -- The case this exists for is Firefox. Every Firefox window shares one class and
+    -- one process, so nothing tells them apart when they open. The hypr-tags extension
+    -- gives each window a stable tag and publishes it through the title, but the tag
+    -- appears a moment after the window does. Deciding at open would key on an identity
+    -- that is not there yet.
+    --
+    -- Empty by default, and a no-op without the extension: with no tag to wait for,
+    -- enabling this only delays the same decision by defer_timeout_ms.
+    --
+    --   defer_classes = { "^firefox$" },
+    defer_classes = {},
+
+    -- How long to wait for a deferred window's identity before giving up and deciding
+    -- on what is known. On timeout the window is placed exactly as it would have been
+    -- without deferral, so waiting too long costs a late placement, not a wrong one.
+    --
+    -- Worth tuning against your own session: the wait has to outlast the extension
+    -- applying its title preface after Firefox restarts, which is slowest at cold boot.
+    defer_timeout_ms = 3000,
+
+    -- How often the waiting windows are checked, and so the granularity of
+    -- defer_timeout_ms. The check only runs while something is actually waiting.
+    defer_poll_ms = 250,
+
     -- Milliseconds after a monitor is added or removed during which moves are not
     -- learned from. A KVM swap or a hotplug reflows whole workspaces at once; that is
     -- the compositor rearranging things, not you deciding where a window belongs.

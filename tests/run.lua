@@ -624,6 +624,246 @@ do
     os.remove(path)
 end
 
+-- ------------------------------------------------------------------------------ tag
+
+local Tag = require("hyprplace.tag")
+
+group("tag.of")
+do
+    eq(Tag.of("[work] Inbox - Mozilla Firefox"), "work", "a tagged title yields its tag")
+    eq(Tag.of("[3f9a1c2b] Something"), "3f9a1c2b", "the default hex form")
+    eq(Tag.of("[a_b-C9] x"), "a_b-C9", "the full alphabet: letters, digits, _ and -")
+    eq(Tag.of("[t] "), "t", "a one-character tag with an empty title")
+
+    eq(Tag.of("Inbox - Mozilla Firefox"), nil, "an untagged title has no tag")
+    eq(Tag.of(""), nil, "an empty title")
+    eq(Tag.of(nil), nil, "no title at all")
+    eq(Tag.of("[work]No space"), nil, "the space after the bracket is required")
+    eq(Tag.of("x [work] y"), nil, "the tag must be anchored at the start")
+    eq(Tag.of("[has space] x"), nil, "spaces are not in the alphabet")
+    eq(Tag.of("[has.dot] x"), nil, "punctuation outside the alphabet is rejected")
+    eq(Tag.of("[" .. string.rep("a", 33) .. "] x"), nil, "over 32 characters is rejected")
+    eq(Tag.of("[" .. string.rep("a", 32) .. "] x"), string.rep("a", 32), "exactly 32 is fine")
+
+    -- The reason for being strict: ordinary titles begin with brackets often enough
+    -- that a loose match would invent identities for windows that have none.
+    eq(Tag.of("[1/3] Downloading - Mozilla Firefox"), nil, "a bracketed progress counter")
+    eq(Tag.of("[Draft] Re: budget"), "Draft", "a bracketed word IS matched -- see note")
+end
+
+group("tag.strip")
+do
+    eq(Tag.strip("[work] Inbox"), "Inbox", "the preface is removed")
+    eq(Tag.strip("Inbox"), "Inbox", "an untagged title is unchanged")
+    eq(Tag.strip("[has space] x"), "[has space] x", "a non-tag prefix is left alone")
+    eq(Tag.strip(nil), "", "nil renders as empty")
+end
+
+-- ------------------------------------------------------------------- deferral (pure)
+
+group("placement defers an unidentifiable window")
+do
+    local cfg = Config.build({ defer_classes = { "^firefox$" }, defer_timeout_ms = 3000 })
+    local state = { version = 1, entries = {} }
+    DB.observe(state, "firefox", { 3 }, os.time())
+
+    local untagged = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    local v = Placement.decide(untagged, { untagged }, state, cfg)
+    eq(v.outcome, "defer", "an untagged firefox window is deferred")
+    ok(v.detail:find("3000") ~= nil, "and says how long it will wait")
+    eq(v.target, nil, "with no target chosen yet")
+
+    local tagged = support.window({ class = "firefox", address = "0xb", workspace = 9,
+        title = "[work] Inbox" })
+    eq(Placement.decide(tagged, { tagged }, state, cfg).outcome, "move",
+        "a tagged firefox window decides immediately")
+    eq(Placement.decide(tagged, { tagged }, state, cfg).tag, "work",
+        "and the verdict carries the tag")
+
+    local kitty = support.window({ class = "kitty", address = "0xc", workspace = 9 })
+    ok(Placement.decide(kitty, { kitty }, state, cfg).outcome ~= "defer",
+        "a class not in defer_classes is never deferred")
+
+    -- The timeout path: same call, deferral spent.
+    local final = Placement.decide(untagged, { untagged }, state, cfg, { may_defer = false })
+    eq(final.outcome, "move", "with may_defer false it decides on what is known")
+    eq(final.target, 3, "which is the class-only placement")
+
+    -- Deferral must not resurrect a window policy has already excluded.
+    local ignored = Config.build({ defer_classes = { "^firefox$" },
+        ignore_classes = { "^firefox$" } })
+    eq(Placement.decide(untagged, { untagged }, state, ignored).outcome, "skip",
+        "an ignored class is skipped, not deferred")
+end
+
+group("deferral is off by default")
+do
+    local cfg = Config.build({})
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    eq(Placement.incomplete(w, cfg), false, "no defer_classes means nothing is deferred")
+end
+
+-- ----------------------------------------------------------------- deferral (plugin)
+
+--- Set up a plugin with one deferrable firefox window remembered on workspace 3.
+local function deferring(title)
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 9,
+        title = title or "" })
+    local hp, h, path = fresh({ w }, {
+        defer_classes = { "^firefox$" },
+        defer_timeout_ms = 1000,
+        defer_poll_ms = 250,
+    })
+    DB.observe(hp.state(), "firefox", { 3 }, os.time())
+    return w, hp, h, path
+end
+
+group("deferral holds a window instead of placing it")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+
+    eq(#h.dispatched, 0, "nothing is dispatched at open")
+    ok(h.handlers["window.title"] ~= nil, "and window.title is subscribed while waiting")
+
+    -- 1000ms timeout at 250ms per sweep is four ticks.
+    for _ = 1, 3 do h.flush_timers() end
+    eq(#h.dispatched, 0, "still waiting before the deadline")
+
+    h.flush_timers()
+    eq(#h.dispatched, 1, "placed when the deadline passes")
+    eq(h.dispatched[1].args.workspace, 3, "on the remembered workspace")
+    eq(h.handlers["window.title"], nil, "and the title subscription is dropped again")
+end
+
+group("deferral acts as soon as the identity arrives")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    eq(#h.dispatched, 0, "waiting")
+
+    -- The extension applies its preface; the compositor reports a title change.
+    w.title = "[work] Inbox - Mozilla Firefox"
+    h.handlers["window.title"](w)
+
+    eq(#h.dispatched, 1, "placed immediately, without waiting for the deadline")
+    eq(h.dispatched[1].args.workspace, 3, "on the remembered workspace")
+    eq(h.handlers["window.title"], nil, "the subscription is released")
+
+    -- The deadline must not then fire a second placement.
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 1, "and the expired deadline does not place it again")
+end
+
+group("a title change that is still untagged keeps waiting")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+
+    w.title = "Loading - Mozilla Firefox"
+    h.handlers["window.title"](w)
+    eq(#h.dispatched, 0, "an untagged title change is not an identity")
+    ok(h.handlers["window.title"] ~= nil, "so it is still waiting")
+end
+
+group("a user move cancels a pending placement (AC-4)")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+
+    -- The user drags it somewhere while hyprplace is still waiting.
+    w.workspace = { id = 7 }
+    h.handlers["window.move_to_workspace"](w, { id = 7 })
+
+    eq(h.handlers["window.title"], nil, "the deferral is dropped")
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 0, "and hyprplace never places it")
+end
+
+group("cancellation survives the startup freeze")
+do
+    -- setup() starts frozen, so this move is not learned from -- but it is still the
+    -- user touching the window, and AC-4 outranks the freeze.
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    h.handlers["window.move_to_workspace"](w, { id = 7 })
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 0, "a move during the settle window still cancels")
+end
+
+group("a mass move does not cancel a pending placement")
+do
+    -- hyprsplit reflow does not carry focus, and must not be mistaken for user intent.
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    w.active = false
+    h.handlers["window.move_to_workspace"](w, { id = 7 })
+    w.active = true
+
+    for _ = 1, 4 do h.flush_timers() end
+    eq(#h.dispatched, 1, "the window is still placed when the deadline passes")
+end
+
+group("closing a pending window cancels it")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    h.handlers["window.close"](w)
+
+    eq(h.handlers["window.title"], nil, "the deferral is dropped")
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 0, "nothing is dispatched for a window that is gone")
+end
+
+group("a window that vanishes before its deadline is not placed")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    -- Gone from the compositor without a close event reaching us.
+    h.windows = {}
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 0, "the address no longer resolves, so nothing is dispatched")
+end
+
+group("shutdown abandons pending placements")
+do
+    local w, hp, h = deferring()
+    h.handlers["window.open_early"](w)
+    h.handlers["hyprland.shutdown"]()
+
+    eq(h.handlers["window.title"], nil, "the subscription is released")
+    for _ = 1, 6 do h.flush_timers() end
+    eq(#h.dispatched, 0, "teardown never places anything")
+end
+
+group("two pending windows are tracked independently")
+do
+    local a = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    local b = support.window({ class = "firefox", address = "0xb", workspace = 9 })
+    local hp, h = fresh({ a, b }, {
+        defer_classes = { "^firefox$" }, defer_timeout_ms = 1000, defer_poll_ms = 250,
+    })
+    DB.observe(hp.state(), "firefox", { 3, 4 }, os.time())
+
+    h.handlers["window.open_early"](a)
+    h.handlers["window.open_early"](b)
+    eq(#h.dispatched, 0, "both are waiting")
+
+    a.title = "[one] x"
+    h.handlers["window.title"](a)
+    eq(#h.dispatched, 1, "resolving one does not resolve the other")
+    ok(h.handlers["window.title"] ~= nil, "and the subscription is held for the other")
+
+    for _ = 1, 4 do h.flush_timers() end
+    eq(#h.dispatched, 2, "the second is placed at its deadline")
+    eq(h.handlers["window.title"], nil, "only then is the subscription released")
+
+    -- Distinct slots: the first took 3, so the second takes 4.
+    local got = { h.dispatched[1].args.workspace, h.dispatched[2].args.workspace }
+    ok((got[1] == 3 and got[2] == 4) or (got[1] == 4 and got[2] == 3),
+        "they take different remembered slots")
+end
+
 -- ----------------------------------------------------------------------------- json
 
 local Json = require("hyprplace.json")
