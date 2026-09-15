@@ -103,6 +103,20 @@ state unless `--purge`.
 Not a make target: it is reversible, touches the live config, and its delicate part
 (editing `hyprland.lua`) lives in `installer.lua` where it is unit tested.
 
+The block it writes is nested. The outer `-- >>> hyprplace >>>` markers delimit generated
+code that is regenerated on every run; the inner `-- >>> hyprplace-config >>>` markers
+delimit the user's settings, which are spliced back verbatim. The inner pair hugs the
+table body only, so the variable name and the `setup()` call stay on the generated side
+and a config edit cannot break the wiring. `example_config.lua` documents every option at
+its default and is what users copy from -- a test asserts it covers every key in
+`Config.defaults()`.
+
+Anything the installer cannot read unambiguously -- duplicate markers, an unpaired one, a
+hand-written block with no config section -- is a **refusal**, never a guess: clobbering
+settings is the failure the nesting exists to prevent. `install` and `status` also `load()`
+the file, so an unbalanced brace is caught there rather than as a session that will not
+come up.
+
 Note the CLI wrapper execs the *installed* copy, so `hyprplace` on PATH and the running
 plugin always agree. Running `./bin/hyprplace` from the repo uses repo modules instead --
 `./install.lua status` reports when the two have drifted.

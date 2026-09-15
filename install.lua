@@ -76,10 +76,11 @@ options:
   --config-dir DIR   Hyprland config dir
   --bin-dir DIR      where the CLI wrapper goes
 
-Editing hyprland.lua is delimited by markers and backed up first. To wire it
-yourself instead, pass --no-config and add:
+Editing hyprland.lua is delimited by markers and backed up first. Your own
+settings go between the inner markers and are preserved when this re-runs.
+To wire it yourself instead, pass --no-config and add:
 
-    ]] .. Installer.CALL .. "\n")
+]] .. Installer.block() .. "\n\n")
 end
 
 local cmd
@@ -107,8 +108,32 @@ local ENTRY      = opts.config_dir .. "/hyprland.lua"
 local WRAPPER    = opts.bin_dir .. "/hyprplace"
 local CLI_TARGET = PLUGIN_DIR .. "/bin/hyprplace"
 
+local failures = 0
 local function head(s) io.write("\n" .. s .. "\n") end
+local function refuse(why)
+    failures = failures + 1
+    io.write("  REFUSING: " .. why .. "\n")
+end
 local function say(s)  io.write("  " .. s .. "\n") end
+
+--- " (3 lines of config)" / " (no config yet)", for status lines.
+---@param config string[]|nil
+---@return string
+local function describe_config(config)
+    if not config then
+        return " (no config section -- re-run install to add one)"
+    end
+    local n = 0
+    for _, line in ipairs(config) do
+        if not line:match("^%s*$") and not line:match("^%s*%-%-") then
+            n = n + 1
+        end
+    end
+    if n == 0 then
+        return " (no settings set)"
+    end
+    return string.format(" (%d line%s of config)", n, n == 1 and "" or "s")
+end
 
 local function act(description, fn)
     if opts.dry_run then
@@ -149,19 +174,53 @@ local function install_config()
     head("config  " .. ENTRY)
     if not exists(ENTRY) then
         say("NOT FOUND -- create it, or wire hyprplace in yourself:")
-        say("    " .. Installer.CALL)
+        for _, line in ipairs(Installer.split_lines(Installer.block())) do
+            say("    " .. line)
+        end
         return
     end
     local text = read(ENTRY)
-    local updated, changed = Installer.upsert_block(text)
-    if not changed then
-        say("already wired, unchanged")
+    local updated, changed, err = Installer.upsert_block(text)
+    if err then
+        refuse(err)
+        say("fix " .. ENTRY .. " by hand, or re-run with --no-config")
         return
     end
+
+    -- Check the file as it stands, not just what we are about to write. A config
+    -- section edited since the last install is the common case, and if it does not
+    -- parse there is nothing for us to change -- so the unchanged path is exactly
+    -- where a broken config would otherwise slip through unmentioned.
+    local intact, ierr = Installer.validate(text)
+    if not intact then
+        refuse(ENTRY .. " does not parse as Lua -- " .. tostring(ierr))
+        say("fix it before reloading Hyprland; the session will not come up as it is")
+        return
+    end
+
+    local existing = Installer.config_of(text)
+    if not changed then
+        say("already wired, unchanged" .. describe_config(existing))
+        return
+    end
+
+    -- Never write a config the compositor cannot parse: that surfaces as a session
+    -- that will not come up, long after this command has exited.
+    local parses, perr = Installer.validate(updated)
+    if not parses then
+        refuse("the result would not parse as Lua -- " .. tostring(perr))
+        say("nothing was written")
+        return
+    end
+
     local backup = ENTRY .. ".hyprplace-backup"
     act("back up to " .. backup, function() return write(backup, text) end)
-    act(Installer.has_block(text) and "update the hyprplace block" or "append the hyprplace block",
+    act(Installer.has_block(text) and "update the hyprplace block"
+        or "append the hyprplace block",
         function() return write(ENTRY, updated) end)
+    if existing then
+        say("kept your config section" .. describe_config(existing))
+    end
     say("backup: " .. backup)
 end
 
@@ -194,9 +253,21 @@ local function uninstall_config()
     if not exists(ENTRY) then say("not found") return end
     local text = read(ENTRY)
     if not Installer.has_block(text) then say("no hyprplace block present") return end
+    local stripped = Installer.remove_block(text)
+    local parses, perr = Installer.validate(stripped)
+    if not parses then
+        refuse("removing the block would leave a file that does not parse -- "
+            .. tostring(perr))
+        say("nothing was written")
+        return
+    end
     local backup = ENTRY .. ".hyprplace-backup"
     act("back up to " .. backup, function() return write(backup, text) end)
-    act("remove the hyprplace block", function() return write(ENTRY, Installer.remove_block(text)) end)
+    act("remove the hyprplace block", function() return write(ENTRY, stripped) end)
+    local existing = Installer.config_of(text)
+    if existing and #existing > 0 then
+        say("your settings went with it; they are in the backup")
+    end
     say("backup: " .. backup)
 end
 
@@ -258,9 +329,17 @@ local function status()
     end
 
     head("config  " .. ENTRY)
-    if not exists(ENTRY) then say("not found")
-    elseif Installer.has_block(read(ENTRY)) then say("wired")
-    else say("not wired") end
+    if not exists(ENTRY) then
+        say("not found")
+    else
+        local text = read(ENTRY)
+        local found, err = Installer.locate(text)
+        if err then say("DAMAGED: " .. err)
+        elseif not found then say("not wired")
+        else say("wired" .. describe_config(found.config)) end
+        local parses, perr = Installer.validate(text)
+        if not parses then say("DOES NOT PARSE: " .. tostring(perr)) end
+    end
 
     head("bin     " .. WRAPPER)
     if not exists(WRAPPER) then say("not installed")
@@ -286,8 +365,13 @@ if cmd == "install" then
     if opts.config then install_config() end
     if opts.bin then install_bin() end
     head("done")
-    say("reload Hyprland (hyprctl reload) to pick it up")
+    if failures > 0 then
+        say("finished with " .. failures .. " refusal(s); see above")
+    else
+        say("reload Hyprland (hyprctl reload) to pick it up")
+    end
     io.write("\n")
+    os.exit(failures == 0 and 0 or 1)
 elseif cmd == "uninstall" then
     if opts.dry_run then io.write("DRY RUN -- nothing will be changed\n") end
     if opts.config then uninstall_config() end
@@ -295,6 +379,7 @@ elseif cmd == "uninstall" then
     if opts.bin then uninstall_bin() end
     handle_state()
     io.write("\n")
+    os.exit(failures == 0 and 0 or 1)
 elseif cmd == "status" then
     status()
 else

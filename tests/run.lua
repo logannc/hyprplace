@@ -1002,11 +1002,14 @@ do
     ok(not Installer.has_block(original), "clean config has no block")
     ok(not Installer.has_block(""), "empty config has no block")
 
-    local wired, changed = Installer.upsert_block(original)
+    local wired, changed, err = Installer.upsert_block(original)
     ok(changed, "wiring reports a change")
+    eq(err, nil, "wiring a clean file is not an error")
     ok(Installer.has_block(wired), "block is present afterwards")
-    ok(wired:find('require("hyprplace").setup({})', 1, true) ~= nil, "the call is there")
+    ok(wired:find(Installer.CALL, 1, true) ~= nil, "the setup call is there")
+    ok(wired:find(Installer.CFG_BEGIN, 1, true) ~= nil, "with a config section")
     ok(wired:sub(1, #original) == original, "existing content is untouched at the front")
+    ok(Installer.validate(wired), "the result parses as Lua")
 
     local again, changed2 = Installer.upsert_block(wired)
     ok(not changed2, "re-wiring reports no change")
@@ -1015,6 +1018,80 @@ do
     -- The round trip that matters: uninstall must give back exactly what we found.
     eq(Installer.remove_block(wired), original, "removal restores the original byte for byte")
     eq(Installer.remove_block(original), original, "removing an absent block changes nothing")
+end
+
+group("installer preserves the config section")
+do
+    local wired = Installer.upsert_block('require("binds")\n')
+    -- Stand in for a user editing between the inner markers.
+    local edited = wired:gsub(
+        Installer.CFG_BEGIN:gsub("%p", "%%%0") .. ".-" .. Installer.CFG_END:gsub("%p", "%%%0"),
+        Installer.CFG_BEGIN .. "\n    ttl_days = 30,\n    debug = true,\n" .. Installer.CFG_END,
+        1)
+    ok(edited:find("ttl_days = 30", 1, true) ~= nil, "the fixture really was edited")
+
+    local cfg = Installer.config_of(edited)
+    eq(#cfg, 2, "both config lines are found")
+    eq(cfg[1], "    ttl_days = 30,", "verbatim, indentation included")
+
+    local again, changed, uerr = Installer.upsert_block(edited)
+    eq(uerr, nil, "re-running over an edited config is not an error")
+    ok(not changed, "re-running over an edited config changes nothing")
+    eq(again, edited, "the user's settings survive byte for byte")
+
+    -- The scaffolding is still regenerated even when the config is kept.
+    local broken = edited:gsub('require%("hyprplace"%)%.setup%(hyprplace_cfg%)', "print('oops')", 1)
+    local fixed, ch2 = Installer.upsert_block(broken)
+    ok(ch2, "a damaged setup call is reported as changed")
+    ok(fixed:find(Installer.CALL, 1, true) ~= nil, "and is restored")
+    ok(not fixed:find("oops", 1, true), "with the junk gone")
+    ok(fixed:find("ttl_days = 30", 1, true) ~= nil, "while the config is still preserved")
+end
+
+group("installer refuses rather than clobbering")
+do
+    local function refuses(text, what)
+        local result, _, err = Installer.upsert_block(text)
+        ok(result == nil and err ~= nil, what)
+    end
+
+    local wired = Installer.upsert_block("")
+
+    refuses(wired .. wired, "two blocks")
+    refuses(wired:gsub(Installer.END:gsub("%p", "%%%0"), "", 1), "block with no closing marker")
+    refuses(Installer.END .. "\n", "closing marker with no block")
+    refuses(wired:gsub(Installer.CFG_END:gsub("%p", "%%%0"), "", 1),
+        "config section with no closing marker")
+    refuses(Installer.CFG_BEGIN .. "\n" .. Installer.CFG_END .. "\n",
+        "config markers outside any block")
+    refuses(Installer.END .. "\n" .. Installer.BEGIN .. "\n", "markers in the wrong order")
+
+    -- A block with no config section that is not a recognisable older one: someone
+    -- has hand-written something in there and we must not destroy it.
+    local handmade = Installer.BEGIN .. "\nrequire('hyprplace').setup({ ttl_days = 1 })\n"
+        .. Installer.END .. "\n"
+    refuses(handmade, "a hand-edited block with no config section")
+
+    local result, _, err = Installer.upsert_block(handmade)
+    ok(err:find("hand%-edited") ~= nil, "and says why")
+    eq(result, nil, "returning no replacement text at all")
+end
+
+group("installer upgrades a pristine older block")
+do
+    -- Exactly what versions before the config section wrote. Nothing of the user's
+    -- is in there, so rewriting it loses nothing.
+    local old = 'require("binds")\n\n' .. Installer.BEGIN .. "\n"
+        .. Installer.LEGACY_CALL .. "\n" .. Installer.END .. "\n"
+
+    local upgraded, changed, err = Installer.upsert_block(old)
+    eq(err, nil, "an old block is not an error")
+    ok(changed, "it is reported as changed")
+    ok(upgraded:find(Installer.CFG_BEGIN, 1, true) ~= nil, "a config section is added")
+    ok(upgraded:find(Installer.CALL, 1, true) ~= nil, "and the call is updated")
+    eq(select(2, upgraded:gsub(Installer.BEGIN, "")), 1, "still exactly one block")
+    eq(Installer.remove_block(upgraded), 'require("binds")\n',
+        "and it still uninstalls cleanly")
 end
 
 group("installer handles awkward files")
@@ -1026,17 +1103,22 @@ do
         "and unwiring yields the content with a newline")
 
     eq(Installer.remove_block(Installer.upsert_block("")), "", "empty file round trips to empty")
-
-    -- A block someone edited by hand, or one written by an older version, is replaced
-    -- rather than duplicated.
-    local stale = "-- top\n\n" .. Installer.BEGIN .. "\nrequire('hyprplace')\nprint('junk')\n"
-        .. Installer.END .. "\n"
-    local fixed, ch = Installer.upsert_block(stale)
-    ok(ch, "a stale block is reported as changed")
-    eq(select(2, fixed:gsub(Installer.BEGIN, "")), 1, "exactly one block afterwards")
-    ok(fixed:find(Installer.CALL, 1, true) ~= nil, "with the correct call")
-    ok(not fixed:find("junk", 1, true), "and the hand-edited contents gone")
 end
+
+group("installer validates the result")
+do
+    ok(Installer.validate('require("binds")\n'), "valid Lua passes")
+    ok(Installer.validate(Installer.block()), "a generated block is valid Lua on its own")
+
+    local wired = Installer.upsert_block("")
+    local unbalanced = wired:gsub(Installer.CFG_BEGIN:gsub("%p", "%%%0"),
+        Installer.CFG_BEGIN .. "\n    ignore_classes = { \"^x$\",\n", 1)
+    local rebuilt = Installer.upsert_block(unbalanced)
+    local parses, verr = Installer.validate(rebuilt)
+    ok(not parses, "an unbalanced brace in the config section is caught")
+    ok(verr ~= nil and verr:find("hyprland.lua") ~= nil, "and reported against hyprland.lua")
+end
+
 
 group("installer shell quoting")
 do
