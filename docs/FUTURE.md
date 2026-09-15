@@ -2,9 +2,40 @@
 
 Optional doc. Not required reading — consult when planning work beyond the MVP.
 
-**Sequencing:** finish the MVP, then *test* the MVP in real use, and only then run the
-exploration exercise below. The near-term items may land earlier, since they are known
-needs rather than open questions.
+**Sequencing:** see below. The original plan -- finish the MVP, test it in real use, then
+explore -- was changed once the Firefox tag design landed. The near-term items may land
+at any point, since they are known needs rather than open questions.
+
+---
+
+## Agreed sequence
+
+Firefox is most of the windows in the session this is built for, and every Firefox
+window currently collapses to the single key `firefox`. Testing the MVP before Firefox
+windows have identities would not be a partial test, it would be a *misleading* one:
+placement would scatter them across the remembered distribution by position, which is
+hard to tell apart from either working or failing. So real-use testing moves after the
+tag work.
+
+| # | Phase | Notes |
+|---|---|---|
+| 0 | Restate AC-4; record the deferral decision | Done. The old wording forbade the feature |
+| 1 | Deferred-decision machinery | The bottleneck: tags and title sampling both need it |
+| 2 | The extension, in dev mode | `extension/` here; `web-ext run`, unsigned, throwaway id |
+| 3 | Tag identity tier | Tier 0, above class + cmdline |
+| 4 | Live MVP testing | The full thing, including the three unverified assumptions |
+| 5 | Distribution | AMO, signing, `policies.json`, root. Separately invoked |
+
+**Not measured, configured.** An earlier plan added a title-timing instrument to
+`hyprplace watch` and measured real Firefox restarts to derive the deferral timeout.
+Dropped: the timeout is a config value with a default, and tuning a number by hand
+against your own session is cheaper than building an instrument to derive it.
+
+**Compositor testing stays deferred, and the risk is accepted.** A harness smoke test
+after phase 1 was considered and declined. The consequence is understood: phases 1 and 3
+change the placement path of a plugin that has never run in a compositor, so a failure
+at phase 4 could come from the MVP or from the new machinery, and separating them will
+cost more then than the smoke test would have cost now.
 
 ---
 

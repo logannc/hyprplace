@@ -40,6 +40,7 @@ hyprplace learns which workspace each app is used on and puts it back there on o
 | 8 | Fake-`hl` unit tests + manual probe harness | Most logic (key derivation, cmdline parsing, ordinals, DB round-trip) needs no compositor. |
 | 9 | Test against v0.56.2 built from source | Exact parity with the running desktop; no dependency work required. |
 | 10 | Nothing may affect anything outside the dev environment | Verified: see Development Environment. |
+| 11 | Placement may be deferred within a bounded window, and any user move cancels it | Some identities are not knowable at `window.open_early`. A Firefox window's tag arrives in a later title event, and title-based disambiguation needs the title to settle. Acting on the first snapshot keys on an identity that is not there yet. The deferral is bounded, configurable, and abandoned the moment the user touches the window -- which is what keeps AC-4 true. |
 
 ## Architecture
 
@@ -152,8 +153,16 @@ exactly where they were.
 exists → hyprplace does nothing and Hyprland decides. Behavior is indistinguishable from
 the plugin not being installed.
 
-**AC-4 (no fighting).** A window the user moves stays moved. hyprplace acts only at open
-time; it never relocates an existing window.
+**AC-4 (no fighting).** A window the user moves stays moved. hyprplace places a window
+once, and only while the window is still untouched: at `window.open_early`, or -- when
+its identity is not knowable that early -- at any point within a bounded deferral after
+it appears. The first user move cancels a pending placement, and hyprplace never
+reconsiders a window it has already placed or the user has already moved.
+
+> Restated when the deferred-decision machinery was designed. The original wording was
+> "hyprplace acts only at open time; it never relocates an existing window", which is
+> the same intent -- do not fight the user -- but phrased as a mechanism that forbids
+> deferral. The invariant that matters is *untouched*, not *instantaneous*.
 
 **AC-5 (persistence).** State survives a full compositor restart.
 

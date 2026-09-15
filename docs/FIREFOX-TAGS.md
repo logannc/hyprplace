@@ -445,16 +445,28 @@ judged to outweigh it. Conditions:
 (hold a window, watch for a later title, act or time out) must exist first. Both this
 and title sampling depend on it. Do not start the extension before that lands.
 
-**The timeout will be measured, not guessed.** The whole design rests on the preface
-reappearing before the plugin stops waiting. `hyprplace watch` can measure the real
-delay on a genuine Firefox restart, and the timeout should be tuned from that
-measurement -- across a cold boot as well as a warm restart, since session restore has
-more to do at boot.
+**The timeout is configured, not measured.** The whole design rests on the preface
+reappearing before the plugin stops waiting, so the number matters. An earlier plan
+built a title-timing instrument into `hyprplace watch` and derived it from a real
+Firefox restart; that was dropped as more machinery than the answer is worth. Instead
+the deferral timeout is a config value with a conservative default, tuned by hand
+against a real session -- including a cold boot as well as a warm restart, since
+session restore has more to do at boot.
+
+**The extension lives in `extension/` in this repo.** Separable does not have to mean a
+separate repository, and one repo keeps the plugin-side contract and the code that
+satisfies it in view of each other. The release pipelines differ, which is a CI concern
+rather than a reason to split: the extension tags and signs independently of the plugin.
+
+**The AMO account is deferred to the distribution phase.** `gecko.id` is bound to the
+signing account and cannot change afterward, so it is a real decision -- but development
+uses `web-ext run` with a throwaway id and does not need it. Deciding it later costs
+nothing; deciding it early would commit an account before there is anything to sign.
 
 ## Open questions this raises for us
 
-- **Where the extension lives.** Separate repo, or a subdirectory here? Separable does
-  not have to mean separate repository, but the release pipelines differ.
-- **`--name` for `app_id`** is noted for multiple profiles, but it is interesting more
-  broadly: an app launched with a distinct `app_id` is trivially distinguishable, which
-  may be a cheaper answer than fingerprinting for other apps too.
+- **`--name` for `app_id`.** Closed for this feature: every window of one Firefox
+  instance shares an `app_id`, so it cannot separate windows within a profile and is no
+  alternative to tags. It remains the answer for *multiple profiles*, and the broader
+  idea -- launching an app under a distinct `app_id` to make it trivially identifiable
+  -- is still worth considering for other apps.
