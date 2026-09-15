@@ -7,7 +7,7 @@ all: test
 
 ## check: does every Lua file parse?
 check:
-	@for f in $(SRC) tests/*.lua harness/*.lua bin/hyprplace installer.lua install.lua; do \
+	@for f in $(SRC) tests/*.lua harness/*.lua bin/hyprplace installer.lua install.lua example_config.lua; do \
 		$(LUA) -e "assert(loadfile('$$f'))" || exit 1; \
 		echo "  ok  $$f"; \
 	done

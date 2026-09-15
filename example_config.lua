@@ -1,0 +1,101 @@
+-- hyprplace: every option, at its default.
+--
+-- This file is a REFERENCE, not something hyprplace loads. Nothing reads it at
+-- runtime; `make test` only checks that it stays in step with config.lua. Copy the
+-- lines you want to change into the config block that the installer writes into your
+-- hyprland.lua:
+--
+--     -- >>> hyprplace >>>
+--     local hyprplace_cfg = {
+--     -- >>> hyprplace-config >>>
+--         ttl_days = 30,                  -- <- your settings go here
+--     -- <<< hyprplace-config <<<
+--     }
+--     require("hyprplace").setup(hyprplace_cfg)
+--     -- <<< hyprplace <<<
+--
+-- Anything between the inner markers survives re-running the installer. Everything
+-- else in that block is regenerated, so do not edit it.
+--
+-- Overrides are a SHALLOW merge: a table you set REPLACES the default table, it does
+-- not extend it. To add one pattern to `ignore_classes`, copy the whole list from
+-- below and append to it -- otherwise you silently drop the defaults.
+
+return {
+    -- Where learned state lives.
+    --
+    -- Commented out because the default is computed: $HYPRPLACE_DB if set, else
+    -- $XDG_STATE_HOME/hyprplace/db.lua, else ~/.local/state/hyprplace/db.lua. Set it
+    -- only if you want the state somewhere else; there is no ~ expansion, so give an
+    -- absolute path.
+    --
+    --   db_path = os.getenv("HOME") .. "/.local/state/hyprplace/db.lua",
+
+    -- Entries not seen within this many days are dropped when the DB loads. Stops
+    -- state growing without bound as you install and remove software.
+    ttl_days = 90,
+
+    -- Lua patterns matched against the window class, lowercased. Matching windows are
+    -- never remembered and never placed -- hyprplace ignores them completely.
+    --
+    -- Good candidates are things that are not really windows you arrange: launchers,
+    -- portals, pickers, transient dialogs.
+    ignore_classes = {
+        "^hyprland%-run$",
+    },
+
+    -- Lua patterns matched against the window class, lowercased. For these classes,
+    -- only windows with a distinguishing command line are remembered or placed.
+    --
+    -- The case this exists for is terminals: a bare `kitty` is a fresh shell whose
+    -- state is gone the moment it closes, so there is nothing meaningful to restore,
+    -- but `kitty btop` is a persistent thing that belongs somewhere. With `^kitty$`
+    -- listed here, the first is ignored and the second is tracked.
+    --
+    -- Empty by default: which terminals you treat this way is your call.
+    --
+    --   require_cmdline = { "^kitty$", "^alacritty$", "^foot$" },
+    require_cmdline = {},
+
+    -- Flags are dropped from the command-line fingerprint by default, because that is
+    -- where volatile junk lives. Steam's argv carries -steampid=, -buildid= and
+    -- -startcount=, all of which change on every launch, so a fingerprint built from
+    -- them can never match the same app twice.
+    --
+    -- Positional arguments are always kept, so `kitty btop` keeps `btop`. This table
+    -- allowlists flags worth keeping anyway, per binary basename, as Lua patterns:
+    --
+    --   keep_flags = {
+    --       kitty = { "^%-%-working%-directory=" },
+    --   },
+    keep_flags = {},
+
+    -- Backstop on fingerprint length, in characters, for binaries launched with a
+    -- great many positional arguments.
+    max_cmdline_len = 120,
+
+    -- Milliseconds after a monitor is added or removed during which moves are not
+    -- learned from. A KVM swap or a hotplug reflows whole workspaces at once; that is
+    -- the compositor rearranging things, not you deciding where a window belongs.
+    monitor_settle_ms = 2000,
+
+    -- Milliseconds after the config loads during which moves are not learned from.
+    --
+    -- At session start the compositor, your workspace plugin and everything in
+    -- autostart move windows around before anything settles, and none of it is your
+    -- intent. Without this freeze, a session where everything lands on workspace 1
+    -- gets learned as "everything belongs on workspace 1" -- and then placed there
+    -- next boot, which makes it true. This also covers `hyprctl reload`.
+    --
+    -- Raise it if your autostart apps are slow to appear.
+    startup_settle_ms = 8000,
+
+    -- Milliseconds to coalesce writes to the state file, so a burst of window moves
+    -- costs one write rather than one each.
+    save_debounce_ms = 1000,
+
+    -- Log what hyprplace decides and why, to the Hyprland log. Worth turning on for a
+    -- session or two when first setting up, or when a window is not going where you
+    -- expect.
+    debug = false,
+}

@@ -53,6 +53,40 @@ do
     ok(not Config.matches("", { "" }), "empty class never matches")
 end
 
+group("example_config documents every option")
+do
+    -- example_config.lua is the reference users copy from. Two lists of the same
+    -- options drift; these assertions are what stop that.
+    local f = assert(io.open(ROOT .. "/example_config.lua", "r"))
+    local text = f:read("a")
+    f:close()
+
+    local example = assert(loadfile(ROOT .. "/example_config.lua"))()
+    local d = Config.defaults()
+
+    local function deep_eq(a, b)
+        if type(a) ~= type(b) then return false end
+        if type(a) ~= "table" then return a == b end
+        for k, v in pairs(a) do if not deep_eq(v, b[k]) then return false end end
+        for k in pairs(b) do if a[k] == nil then return false end end
+        return true
+    end
+
+    for key in pairs(d) do
+        -- Mentioned, not necessarily set: db_path's default is computed from the
+        -- environment, so the example documents it in a comment instead.
+        ok(text:find(key, 1, true) ~= nil, key .. " is documented in example_config")
+    end
+
+    for key, value in pairs(example) do
+        ok(d[key] ~= nil, key .. " in example_config is a real option")
+        ok(deep_eq(value, d[key]), key .. " in example_config matches the default")
+    end
+
+    ok(deep_eq(Config.build(example), Config.build({})),
+        "loading the example changes nothing -- it is the defaults")
+end
+
 -- ------------------------------------------------------------------------- identity
 
 local Identity = require("hyprplace.identity")
