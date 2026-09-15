@@ -341,12 +341,23 @@ end
 
 -- ----------------------------------------------------------------- handlers via hl
 
+-- Everything the suite writes, removed at the end. setup() writes a config cache as
+-- well as the state file, and without an explicit override that cache lands in the
+-- user's real ~/.local/state/hyprplace -- which running the tests must never touch.
+local tmpfiles = {}
+local function tmpfile()
+    local path = os.tmpname()
+    tmpfiles[#tmpfiles + 1] = path
+    return path
+end
+
 local function fresh(windows, user_cfg)
     package.loaded["hyprplace"] = nil
     local h = support.fake_hl(windows)
     _G.hl = h
     local cfg = user_cfg or {}
-    cfg.db_path = cfg.db_path or os.tmpname()
+    cfg.db_path = cfg.db_path or tmpfile()
+    cfg.cache_path = cfg.cache_path or tmpfile()
     local hp = require("hyprplace").setup(cfg)
     return hp, h, cfg.db_path
 end
@@ -1383,6 +1394,131 @@ do
         in_make[m] = nil
     end
     eq(next(in_make), nil, "the Makefile lists nothing the installer would miss")
+end
+
+-- ---------------------------------------------------------------------- config cache
+
+local Cache = require("hyprplace.cache")
+
+group("cache round trip")
+do
+    local cfg = Config.build({
+        defer_classes = { "^firefox$" },
+        require_cmdline = { "^kitty$" },
+        keep_flags = { kitty = { "^%-%-working%-directory=" } },
+        ttl_days = 30,
+        debug = true,
+    })
+    local back = Cache.deserialize(Cache.serialize(cfg))
+    ok(back ~= nil, "a serialized config parses back")
+    eq(back.ttl_days, 30, "numbers survive")
+    eq(back.debug, true, "booleans survive")
+    eq(back.defer_classes[1], "^firefox$", "arrays of patterns survive")
+    eq(back.keep_flags.kitty[1], "^%-%-working%-directory=", "nested tables survive")
+    eq(back.db_path, cfg.db_path, "paths survive")
+
+    eq(Cache.serialize(cfg), Cache.serialize(Config.build(cfg)),
+        "serialization is stable -- an unchanged config produces identical bytes")
+end
+
+group("cache handles awkward values")
+do
+    local back = Cache.deserialize(Cache.serialize({
+        empty_table = {},
+        ["a key with spaces"] = 1,
+        ["end"] = 2,
+        fraction = 0.5,
+        negative = -3,
+        quoted = 'he said "hi"',
+        callback = function() end,
+    }))
+    ok(back ~= nil, "it parses")
+    eq(next(back.empty_table), nil, "an empty table round trips")
+    eq(back["a key with spaces"], 1, "keys needing brackets are quoted")
+    eq(back["end"], 2, "a reserved word as a key is quoted")
+    eq(back.fraction, 0.5, "floats survive")
+    eq(back.negative, -3, "negatives survive")
+    eq(back.quoted, 'he said "hi"', "embedded quotes survive")
+    eq(back.callback, nil, "a value with no representation is skipped, not fatal")
+end
+
+group("cache rejects what it cannot trust")
+do
+    eq(Cache.deserialize(nil), nil, "nil")
+    eq(Cache.deserialize(""), nil, "empty")
+    eq(Cache.deserialize("this is not lua"), nil, "garbage")
+    eq(Cache.deserialize("return 5"), nil, "not a table")
+    eq(Cache.deserialize("return { version = 1 }"), nil, "no config key")
+    eq(Cache.deserialize("return { version = 99, config = {} }"), nil,
+        "a version we do not know")
+    -- Loaded in an empty environment: a cache file cannot reach the host.
+    eq(Cache.deserialize("return { version = 1, config = { x = os.time() } }"), nil,
+        "a file trying to call out fails rather than running")
+end
+
+group("cache save is atomic and skips no-op writes")
+do
+    local path = tmpfile()
+    local cfg = Config.build({ ttl_days = 7 })
+
+    ok(Cache.save(path, cfg), "writes")
+    eq(Cache.load(path).ttl_days, 7, "and loads back")
+
+    local f = assert(io.open(path, "r"))
+    local first = f:read("a")
+    f:close()
+    ok(Cache.save(path, cfg), "writing the same config again succeeds")
+    f = assert(io.open(path, "r"))
+    eq(f:read("a"), first, "and leaves the file byte-identical")
+    f:close()
+
+    ok(io.open(path .. ".tmp", "r") == nil, "no temp file is left behind")
+    eq(Cache.load("/nonexistent/hyprplace/config.lua"), nil, "a missing cache is nil")
+end
+
+group("the plugin publishes its config for the tools")
+do
+    -- The drift this exists to close: with defer_classes set, the plugin defers a
+    -- Firefox window while a tool running on defaults would report `move`.
+    local cache_path = tmpfile()
+    local w = support.window({ class = "firefox", address = "0xa", workspace = 9 })
+    local hp, h = fresh({ w }, {
+        cache_path = cache_path,
+        defer_classes = { "^firefox$" },
+        require_cmdline = { "^kitty$" },
+    })
+    DB.observe(hp.state(), "firefox", { 3 }, os.time())
+
+    local published = Cache.load(cache_path)
+    ok(published ~= nil, "setup writes the resolved config")
+    eq(published.defer_classes[1], "^firefox$", "including what the user set")
+    eq(published.ttl_days, Config.defaults().ttl_days, "and the defaults it resolved to")
+
+    -- A tool built from the published config agrees with the plugin; one built from
+    -- defaults does not.
+    local tool_cfg = Config.build(published)
+    eq(Placement.decide(w, { w }, hp.state(), tool_cfg).outcome, "defer",
+        "a tool reading the cache reports what the plugin does")
+    eq(Placement.decide(w, { w }, hp.state(), Config.build({})).outcome, "move",
+        "and a tool on defaults would have reported something else")
+end
+
+-- ------------------------------------------------------------------- containment
+
+group("the suite writes nothing outside its temp files")
+do
+    -- setup() writes a config cache, so a test that forgets to override cache_path
+    -- would silently write into the user's real state directory. This is the backstop.
+    for _, path in ipairs({ Config.defaults().db_path, Config.defaults().cache_path }) do
+        local f = io.open(path, "r")
+        if f then f:close() end
+        ok(f == nil, "the real " .. path:match("[^/]+$") .. " was not created")
+    end
+end
+
+for _, path in ipairs(tmpfiles) do
+    os.remove(path)
+    os.remove(path .. ".tmp")
 end
 
 -- --------------------------------------------------------------------------- report

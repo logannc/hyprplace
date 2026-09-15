@@ -1,5 +1,5 @@
 LUA ?= lua
-SRC := init.lua config.lua db.lua identity.lua placement.lua json.lua policy.lua cli.lua learn.lua tag.lua
+SRC := init.lua config.lua db.lua identity.lua placement.lua json.lua policy.lua cli.lua learn.lua tag.lua cache.lua
 
 .PHONY: check test all
 

@@ -141,6 +141,14 @@ the whole point.
 - Recorded on deliberate move and on window close. `hyprland.shutdown` alone is
   insufficient — it does not fire on a hard crash.
 
+Alongside it, `config.lua` in the same directory holds the configuration the running
+plugin resolved, rewritten at each config load and read by the CLI tools. The user's
+config lives inside a marked block in `hyprland.lua`, which nothing but the compositor
+reads, so without this the tools would run on defaults and report verdicts the plugin
+would not reach. Publishing what was resolved — rather than having the tools re-derive
+it — makes them correct by construction. It is generated state: losing it costs the
+tools their accuracy until the next config load and nothing more.
+
 ## Acceptance criteria
 
 **AC-1 (core).** Open an app on workspace 3, close it, relaunch it from anywhere → it

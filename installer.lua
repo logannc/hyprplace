@@ -8,7 +8,7 @@ local M = {}
 --- The plugin's runtime modules. The single source of truth for what gets installed;
 --- tests assert the Makefile agrees with this list.
 M.MODULES = {
-    "init.lua", "config.lua", "db.lua", "identity.lua",
+    "init.lua", "config.lua", "db.lua", "identity.lua", "cache.lua",
     "placement.lua", "policy.lua", "learn.lua", "json.lua", "cli.lua",
     "tag.lua",
 }

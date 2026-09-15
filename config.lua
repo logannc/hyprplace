@@ -13,6 +13,12 @@ function M.defaults()
         -- Where the learned state lives. HYPRPLACE_DB overrides, for tests.
         db_path = os.getenv("HYPRPLACE_DB") or (state_home() .. "/hyprplace/db.lua"),
 
+        -- Where the plugin writes the configuration it resolved, so the CLI tools can
+        -- report what the running plugin would actually do rather than what the
+        -- defaults would. Generated, not user data. HYPRPLACE_CONFIG_CACHE overrides.
+        cache_path = os.getenv("HYPRPLACE_CONFIG_CACHE")
+            or (state_home() .. "/hyprplace/config.lua"),
+
         -- Entries not seen within this many days are dropped when the DB loads.
         ttl_days = 90,
 

@@ -31,6 +31,17 @@ return {
     --
     --   db_path = os.getenv("HOME") .. "/.local/state/hyprplace/db.lua",
 
+    -- Where the plugin writes the configuration it resolved, so `hyprplace plan`,
+    -- `diff` and `watch` report what the running plugin would actually do instead of
+    -- what the defaults would. Generated, not user data: deleting it costs the tools
+    -- their accuracy until the next config load, and nothing else.
+    --
+    -- Commented out because the default is computed, the same way db_path is:
+    -- $HYPRPLACE_CONFIG_CACHE, else $XDG_STATE_HOME/hyprplace/config.lua, else
+    -- ~/.local/state/hyprplace/config.lua.
+    --
+    --   cache_path = os.getenv("HOME") .. "/.local/state/hyprplace/config.lua",
+
     -- Entries not seen within this many days are dropped when the DB loads. Stops
     -- state growing without bound as you install and remove software.
     ttl_days = 90,

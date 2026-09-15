@@ -11,7 +11,7 @@ because none of them involve a real compositor.
 
 | | |
 |---|---|
-| Plugin | `init.lua` + `config` `db` `identity` `placement` `policy` `learn` |
+| Plugin | `init.lua` + `config` `db` `identity` `placement` `policy` `learn` `tag` `cache` |
 | Tools | `bin/hyprplace` — `fingerprint` `plan` `db` `diff` `prune` `watch` |
 | Installer | `./install.lua install \| uninstall \| status` |
 | Test harness | `./harness/compositor.sh start\|stop\|cmd\|repl` |
@@ -116,6 +116,14 @@ hand-written block with no config section -- is a **refusal**, never a guess: cl
 settings is the failure the nesting exists to prevent. `install` and `status` also `load()`
 the file, so an unbalanced brace is caught there rather than as a session that will not
 come up.
+
+The plugin writes the configuration it resolved to `~/.local/state/hyprplace/config.lua`
+at every config load, and the CLI reads it. Without that the tools run on built-in
+defaults, so `hyprplace plan` reports `move` for a window the plugin defers and calls a
+window tracked that `require_cmdline` excludes -- a tool disagreeing with the plugin is
+worse than no tool. It is generated state, not user data: `uninstall` deletes it,
+`--purge` is only needed for the learned state, and `hyprplace --no-config` ignores it.
+`hyprplace db` prints which config it used.
 
 Note the CLI wrapper execs the *installed* copy, so `hyprplace` on PATH and the running
 plugin always agree. Running `./bin/hyprplace` from the repo uses repo modules instead --

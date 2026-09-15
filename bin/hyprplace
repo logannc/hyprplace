@@ -15,9 +15,17 @@
 -- sees windows only after the compositor has placed them, never at window.open_early.
 -- For ground truth about what the plugin actually did, read its own log output.
 --
+-- The plugin publishes the configuration it resolved to a cache file at config load,
+-- and these tools read it. Without that they would run on defaults and report a
+-- different verdict from the plugin the moment any option is set. If the cache is
+-- absent -- the plugin has never loaded, or was never installed -- they fall back to
+-- defaults and say so.
+--
 --   --instance SIG   target another Hyprland instance (e.g. the test compositor)
 --   --runtime DIR    XDG_RUNTIME_DIR for that instance
 --   --db PATH        state file to read (default: config's db_path)
+--   --config PATH    config cache to read (default: config's cache_path)
+--   --no-config      ignore the cache and use built-in defaults
 
 local script = debug.getinfo(1, "S").source:sub(2)
 local ROOT = script:match("^(.*)/bin/[^/]*$") or "."
@@ -32,6 +40,7 @@ table.insert(package.searchers, 2, function(name)
 end)
 
 local CLI    = require("hyprplace.cli")
+local Cache  = require("hyprplace.cache")
 local Config = require("hyprplace.config")
 local DB     = require("hyprplace.db")
 
@@ -45,6 +54,8 @@ local function parse_args(argv)
         if a == "--instance" or a == "-i" then i = i + 1; opts.instance = argv[i]
         elseif a == "--runtime"           then i = i + 1; opts.runtime  = argv[i]
         elseif a == "--db"                then i = i + 1; opts.db       = argv[i]
+        elseif a == "--config"            then i = i + 1; opts.config   = argv[i]
+        elseif a == "--no-config"         then opts.no_config = true
         elseif a == "--apply"             then opts.apply = true
         elseif a == "--interval"          then i = i + 1; opts.interval = tonumber(argv[i])
         elseif a == "-h" or a == "--help" then opts.help = true
@@ -75,8 +86,14 @@ options:
   -i, --instance SIG   target another Hyprland instance
       --runtime DIR    XDG_RUNTIME_DIR for that instance
       --db PATH        state file to read
+      --config PATH    config cache to read
+      --no-config      ignore the cache; report against built-in defaults
       --apply          prune only: actually write the pruned state
       --interval SEC   watch only: poll interval (default 0.25)
+
+These tools read the configuration the running plugin resolved, so their verdicts match
+its behaviour. `db` prints which config it used; if the plugin has never loaded there is
+no cache and they fall back to defaults.
 
 Every command except `prune --apply` is read-only: they never dispatch to the compositor.
 ]])
@@ -136,8 +153,9 @@ end
 function commands.db(cfg, _)
     local state = DB.load(cfg.db_path)
     local rows = CLI.db_rows(state, cfg, os.time())
-    io.write(string.format("state: %s\n%d entr%s, ttl %d days\n\n",
-        cfg.db_path, #rows, #rows == 1 and "y" or "ies", cfg.ttl_days))
+    io.write(string.format("state:  %s\nconfig: %s\n%d entr%s, ttl %d days\n\n",
+        cfg.db_path, cfg._source or "?", #rows, #rows == 1 and "y" or "ies",
+        cfg.ttl_days))
     for _, r in ipairs(rows) do
         local ws = {}
         for _, id in ipairs(r.workspaces) do ws[#ws + 1] = tostring(id) end
@@ -306,5 +324,19 @@ if not handler then
     os.exit(2)
 end
 
-local cfg = Config.build(opts.db and { db_path = opts.db } or {})
+-- Resolve config the way the plugin did, so the verdicts match.
+local overrides, source = {}, "built-in defaults"
+if not opts.no_config then
+    local cache_path = opts.config or Config.defaults().cache_path
+    local cached = Cache.load(cache_path)
+    if cached then
+        overrides, source = cached, cache_path
+    end
+end
+if opts.db then
+    overrides.db_path = opts.db
+end
+local cfg = Config.build(overrides)
+cfg._source = source
+
 handler(cfg, opts)

@@ -14,6 +14,7 @@
 --   * This runs INSIDE the compositor process. Every handler is pcall-wrapped; an error
 --     in hyprplace must never take the compositor down (AC-6).
 
+local Cache     = require("hyprplace.cache")
 local Config    = require("hyprplace.config")
 local DB        = require("hyprplace.db")
 local Identity  = require("hyprplace.identity")
@@ -380,6 +381,19 @@ end
 function M.setup(user_config)
     M._cfg = Config.build(user_config)
     DB.ensure_dir(M._cfg.db_path)
+
+    -- Publish what we resolved so the CLI reports this plugin's behaviour rather than
+    -- the defaults'. The user's config lives in hyprland.lua, which nothing but the
+    -- compositor reads, so without this the tools and the plugin disagree the moment
+    -- any option is set. Written on every config load; Cache.save skips the write when
+    -- nothing changed.
+    if M._cfg.cache_path then
+        DB.ensure_dir(M._cfg.cache_path)
+        local saved, cerr = Cache.save(M._cfg.cache_path, M._cfg)
+        if not saved then
+            print("[hyprplace] failed to write the config cache: " .. tostring(cerr))
+        end
+    end
 
     local state = DB.load(M._cfg.db_path)
     local dropped
