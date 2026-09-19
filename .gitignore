@@ -1,4 +1,5 @@
 *.log
 dist/
+extension/.amo-upload-uuid
 extension/web-ext-artifacts/
 extension/node_modules/
