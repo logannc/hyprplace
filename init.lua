@@ -125,9 +125,9 @@ end
 ---@param w table
 ---@param windows table[]
 ---@return boolean
+---@return boolean tracked, string reason
 local function tracked(w, windows)
-    local ok = Policy.decide(w, windows, M._cfg)
-    return ok
+    return Policy.decide(w, windows, M._cfg)
 end
 
 local function key_fn(windows)
@@ -185,7 +185,7 @@ end
 --- a different moment, acts through exactly the same code.
 local function apply(w, verdict)
     if verdict.outcome == "skip" then
-        log("skip %q: %s", Identity.render(verdict.key), verdict.detail)
+        log("place skip  %q -- %s", Identity.render(verdict.key), verdict.detail)
         return
     end
 
@@ -196,13 +196,14 @@ local function apply(w, verdict)
     schedule_save()
 
     if verdict.outcome == "stay" then
+        log("place stay  %q -- %s", Identity.render(verdict.key), verdict.detail)
         return
     end
 
     -- Note: the target workspace need not exist yet. At session start most workspaces
     -- do not, and Hyprland creates one on demand -- which is exactly what we want when
     -- restoring after a reboot.
-    log("placing %q -> workspace %d", Identity.render(verdict.key), verdict.target)
+    log("place move  %q -- %s", Identity.render(verdict.key), verdict.detail)
     M._guard = true
     local ok, err = pcall(function()
         hl.dispatch(hl.dsp.window.move({ window = w, workspace = verdict.target, follow = false }))
@@ -324,7 +325,7 @@ local function place(w)
     local windows = hl.get_windows()
     local verdict = Placement.decide(w, windows, M._state, M._cfg)
     if verdict.outcome == "defer" then
-        log("defer %q: %s", tostring(verdict.class), verdict.detail)
+        log("place defer %q -- %s", tostring(verdict.class), verdict.detail)
         defer(w)
         return
     end
@@ -346,11 +347,16 @@ local function remember(w, ws_id, why)
         return
     end
     local windows = hl.get_windows()
-    if not tracked(w, windows) then
+    local ok, reason = tracked(w, windows)
+    if not ok then
+        log("learn skip  %q -- %s", tostring(Policy.class_of(w) or "(no class)"),
+            Policy.EXPLAIN[reason] or reason)
         return
     end
     local key = Identity.key_for(w, windows, M._cfg)
     if not key then
+        log("learn skip  %q -- no identity could be derived",
+            tostring(Policy.class_of(w) or "(no class)"))
         return
     end
 
@@ -363,7 +369,7 @@ local function remember(w, ws_id, why)
     for _, id in ipairs(distribution) do
         ws[#ws + 1] = tostring(id)
     end
-    log("learned (%s) %q -> workspace%s %s (%d window%s)", why, Identity.render(key),
+    log("learn %-5s %q -- workspace%s %s (%d window%s)", why, Identity.render(key),
         #ws == 1 and "" or "s", table.concat(ws, ","),
         #distribution, #distribution == 1 and "" or "s")
     schedule_save()

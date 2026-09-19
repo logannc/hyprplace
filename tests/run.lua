@@ -862,9 +862,30 @@ do
     h.handlers["window.move_to_workspace"](w, { id = 6 })
 
     local text = log_text()
-    ok(text:find("learned", 1, true) ~= nil, "a learned move is recorded")
+    ok(text:find("learn move", 1, true) ~= nil, "a learned move is recorded")
     ok(text:find("workspace 6", 1, true) ~= nil,
         "including which workspace -- the fact the line exists to record")
+
+    -- Declining to learn is a decision too, and used to be invisible: an ignored
+    -- window produced no line at all, which read as the event never arriving.
+    local quiet = tmpfile()
+    local ignored = support.window({ class = "kitty", address = "0xb", workspace = 3 })
+    local hp2, h2 = fresh({ ignored },
+        { debug = true, log_path = quiet, ignore_classes = { "^kitty$" } })
+    h2.flush_timers()
+    h2.handlers["window.move_to_workspace"](ignored, { id = 6 })
+
+    local f = assert(io.open(quiet, "r"))
+    local ignored_text = f:read("a")
+    f:close()
+    ok(ignored_text:find("learn skip", 1, true) ~= nil, "a declined learn is recorded")
+    ok(ignored_text:find("ignore_classes", 1, true) ~= nil, "with the rule that declined it")
+
+    -- The two paths are distinguishable. "skip" alone described the window, when it
+    -- describes one decision on one path: placement skipping says nothing about
+    -- whether learning will.
+    ok(ignored_text:find("place skip", 1, true) == nil,
+        "and is not confusable with a placement skip")
 
     -- An error must reach the file whatever `debug` says; AC-6 contains failures, and
     -- a contained failure nobody can see is barely better than a crash.
