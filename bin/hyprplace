@@ -11,6 +11,10 @@
 --   hyprplace prune            entries the TTL would drop (--apply to write)
 --   hyprplace watch            live feed of window changes and hyprplace verdicts
 --
+-- watch reports a title change only when it changes the window's identity -- a tag
+-- appearing, changing or being lost. --titles reports all of them, which in a browser
+-- means one per page load.
+--
 -- watch polls. It cannot observe a change that is reverted inside one interval, and it
 -- sees windows only after the compositor has placed them, never at window.open_early.
 -- For ground truth about what the plugin actually did, read its own log output.
@@ -58,6 +62,7 @@ local function parse_args(argv)
         elseif a == "--no-config"         then opts.no_config = true
         elseif a == "--apply"             then opts.apply = true
         elseif a == "--interval"          then i = i + 1; opts.interval = tonumber(argv[i])
+        elseif a == "--titles"            then opts.titles = true
         elseif a == "-h" or a == "--help" then opts.help = true
         elseif not cmd                    then cmd = a
         else io.stderr:write("unknown argument: " .. a .. "\n"); os.exit(2)
@@ -90,6 +95,8 @@ options:
       --no-config      ignore the cache; report against built-in defaults
       --apply          prune only: actually write the pruned state
       --interval SEC   watch only: poll interval (default 0.25)
+      --titles         watch only: report every title change, not just the ones
+                       that change a window's identity
 
 These tools read the configuration the running plugin resolved, so their verdicts match
 its behaviour. `db` prints which config it used; if the plugin has never loaded there is
@@ -279,6 +286,26 @@ function commands.watch(cfg, opts)
                     #rec.distribution == 1 and "" or "s"))
             else
                 io.write(string.format("    learn  nothing (%s)\n", tostring(rec.reason)))
+            end
+        end
+
+        -- Title changes are constant noise -- every page load in every browser tab --
+        -- so only the ones that change the window's identity are shown by default.
+        -- That is exactly the event the Firefox extension produces: a window appears
+        -- untagged and is tagged a moment later.
+        for _, r in ipairs(delta.retitled) do
+            if r.tagged or opts.titles then
+                local w = r.window
+                io.write(string.format("T %-18s %s -> %s\n", w.class or "?",
+                    tostring(r.from_tag or "(untagged)"),
+                    tostring(r.to_tag or "(untagged)")))
+                io.write(string.format("    title  %s\n", CLI.short_title(r.to)))
+                if r.tagged then
+                    -- The identity changed, so what the plugin would do changed too.
+                    local rec = CLI.would_record(w, windows,
+                        w.workspace and w.workspace.id, cfg)
+                    io.write(string.format("    key    %s\n", CLI.show_key(rec.key)))
+                end
             end
         end
 

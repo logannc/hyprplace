@@ -1259,6 +1259,45 @@ do
         "ttl disabled -> nothing expires")
 end
 
+group("cli.window_delta reports title changes")
+do
+    local function snap(title, ws)
+        return { support.window({ class = "firefox", address = "0xa",
+            workspace = ws or 3, title = title }) }
+    end
+
+    local d = CLI.window_delta(snap("Inbox"), snap("[work] Inbox"))
+    eq(#d.retitled, 1, "a title change is reported")
+    eq(d.retitled[1].from, "Inbox", "with the old title")
+    eq(d.retitled[1].to, "[work] Inbox", "and the new one")
+    eq(d.retitled[1].from_tag, nil, "untagged before")
+    eq(d.retitled[1].to_tag, "work", "tagged after")
+    ok(d.retitled[1].tagged, "and flagged as an identity change")
+
+    -- The common case, and the reason watch filters: navigation.
+    d = CLI.window_delta(snap("[work] Inbox"), snap("[work] Reddit"))
+    eq(#d.retitled, 1, "a page change is still reported")
+    ok(not d.retitled[1].tagged, "but is not an identity change")
+
+    d = CLI.window_delta(snap("[work] x"), snap("[home] x"))
+    ok(d.retitled[1].tagged, "a rename is an identity change")
+
+    d = CLI.window_delta(snap("[work] x"), snap("x"))
+    eq(d.retitled[1].to_tag, nil, "losing a tag is reported")
+    ok(d.retitled[1].tagged, "and is an identity change")
+
+    eq(#CLI.window_delta(snap("same"), snap("same")).retitled, 0,
+        "an unchanged title is not a change")
+
+    -- A window can be dragged and retitled between two polls; both happened.
+    d = CLI.window_delta(snap("a", 3), snap("b", 4))
+    eq(#d.moved, 1, "the move is reported")
+    eq(#d.retitled, 1, "and so is the retitle")
+
+    eq(#CLI.window_delta(nil, snap("x")).retitled, 0,
+        "the first poll has nothing to compare against")
+end
+
 group("cli.window_delta")
 do
     local a = support.window({ class = "kitty", address = "0xa", workspace = 1 })

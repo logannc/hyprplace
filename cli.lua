@@ -11,6 +11,7 @@ local Json      = require("hyprplace.json")
 local Learn     = require("hyprplace.learn")
 local Placement = require("hyprplace.placement")
 local Policy    = require("hyprplace.policy")
+local Tag       = require("hyprplace.tag")
 
 local M = {}
 
@@ -230,7 +231,7 @@ end
 ---@param after table[]
 ---@return table  { appeared = {}, vanished = {}, moved = {} }
 function M.window_delta(before, after)
-    local delta = { appeared = {}, vanished = {}, moved = {} }
+    local delta = { appeared = {}, vanished = {}, moved = {}, retitled = {} }
     local prev = {}
     for _, w in ipairs(before or {}) do
         prev[w.address] = w
@@ -248,6 +249,21 @@ function M.window_delta(before, after)
             local b = w.workspace and w.workspace.id
             if a ~= b then
                 delta.moved[#delta.moved + 1] = { window = w, from = a, to = b }
+            end
+            -- Independent of the move: a window can be dragged and retitled between
+            -- two polls, and both are things that happened.
+            if was.title ~= w.title then
+                local from_tag, to_tag = Tag.of(was.title), Tag.of(w.title)
+                delta.retitled[#delta.retitled + 1] = {
+                    window   = w,
+                    from     = was.title,
+                    to       = w.title,
+                    from_tag = from_tag,
+                    to_tag   = to_tag,
+                    -- The only title change that alters the window's identity, and so
+                    -- the only one the plugin cares about.
+                    tagged   = from_tag ~= to_tag,
+                }
             end
         end
     end
