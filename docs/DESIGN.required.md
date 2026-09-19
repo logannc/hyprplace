@@ -234,30 +234,11 @@ isolated runtime dir and no GPU access, verified to leave the live session untou
 
 ## Measured behaviour
 
-All measured in the contained harness against v0.56.2. See `harness/probe.lua`.
-
-**The Lua VM is destroyed and recreated on `hyprctl reload`.** A marker planted in `_G`
-via the repl does not survive a reload, and the config's load counter reads 1 afterwards,
-not 2. Consequences: `hl.on` subscriptions *cannot* stack, so idempotent registration is
-unnecessary; and every reload starts from an empty `_G`, so the DB must be read from disk
-at module load. The absence of `config.unload` in 0.56.2 therefore does not matter.
-
-**Event order on window open is `window.class` → `window.open_early` → `window.open`.**
-At `open_early` a native Wayland window already has `class`, `initial_class`, `title`,
-`pid`, and `workspace.id` populated — everything placement needs. `window.class` fires
-earlier still, but with empty `initial_class`/`title` and a nil workspace, so it is only
-useful as an XWayland fallback.
-
-**Our own dispatch does echo back as `window.move_to_workspace`, synchronously.** The
-handler runs inside the `hl.dispatch` call, while the guard flag is still set. So a plain
-non-reentrant boolean guard is both necessary (the echo is real) and sufficient (there is
-no async window in which the flag has already been cleared).
-
-**`hl.dsp.window.move` follows focus by default; `follow = false` makes it silent.** With
-`follow = false` the window moves and the active monitor and workspace do not change,
-which is exactly AC-2. Placement must always pass it.
-
-**Handler signature.** `window.move_to_workspace` receives `(window, workspace)`.
+Moved to [OBSERVED.md](OBSERVED.md) — how Hyprland actually behaves, established by
+experiment or by reading its source: reload semantics, event order and what is populated
+when, dispatch echo, timer and subscription lifetimes, tag representation, and what
+hyprsplit does on hotplug. Read it before assuming anything about the compositor's API
+from its shape.
 
 ## Open questions
 

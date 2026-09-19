@@ -322,6 +322,52 @@ function M.short_title(title, width)
     return title:sub(1, width - 1) .. "\u{2026}"
 end
 
+--- Entries whose rendered key matches `pattern`.
+---
+--- Matched against the *rendered* key, not the raw one: a key joins its parts with NUL,
+--- which cannot be typed at a shell. So `kitty + kitty btop` is what the user sees in
+--- every tool and what they can match on, with `btop` or `^kitty %+` or anything else.
+---
+--- A Lua pattern rather than an exact name, because the useful case is usually a group:
+--- everything a test session left behind, every entry for an app being uninstalled.
+---@param state table
+---@param pattern string
+---@return table[] rows, string|nil err
+function M.forget_rows(state, pattern)
+    if not pattern or pattern == "" then
+        return {}, "a pattern is required"
+    end
+    local rows = {}
+    for key, e in pairs(state.entries or {}) do
+        local shown = Identity.render(key)
+        local ok, matched = pcall(string.match, shown, pattern)
+        if not ok then
+            return {}, "bad pattern: " .. tostring(matched)
+        end
+        if matched then
+            rows[#rows + 1] = { key = key, shown = shown,
+                workspaces = e.workspaces or {}, seen = e.seen }
+        end
+    end
+    table.sort(rows, function(a, b) return a.shown < b.shown end)
+    return rows
+end
+
+--- Remove the given entries. Returns how many went.
+---@param state table
+---@param rows table[]
+---@return integer
+function M.forget(state, rows)
+    local n = 0
+    for _, r in ipairs(rows or {}) do
+        if state.entries[r.key] ~= nil then
+            state.entries[r.key] = nil
+            n = n + 1
+        end
+    end
+    return n
+end
+
 -- ------------------------------------------------------------------------- presentation
 
 --- A key as a human should read it. Delegates to Identity so the tools and the

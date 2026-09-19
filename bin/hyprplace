@@ -9,6 +9,7 @@
 --   hyprplace db               current learned state, newest first
 --   hyprplace diff             where learned state and reality disagree
 --   hyprplace prune            entries the TTL would drop (--apply to write)
+--   hyprplace forget PATTERN   drop entries whose key matches (--apply to write)
 --   hyprplace watch            live feed of window changes and hyprplace verdicts
 --
 -- watch reports a title change only when it changes the window's identity -- a tag
@@ -51,7 +52,8 @@ local DB     = require("hyprplace.db")
 -- ------------------------------------------------------------------------------- args
 
 local function parse_args(argv)
-    local opts, cmd = {}, nil
+    -- `args` collects positionals after the command, for `forget PATTERN`.
+    local opts, cmd = { args = {} }, nil
     local i = 1
     while i <= #argv do
         local a = argv[i]
@@ -65,7 +67,8 @@ local function parse_args(argv)
         elseif a == "--titles"            then opts.titles = true
         elseif a == "-h" or a == "--help" then opts.help = true
         elseif not cmd                    then cmd = a
-        else io.stderr:write("unknown argument: " .. a .. "\n"); os.exit(2)
+        -- Anything else after the command is a positional, for `forget PATTERN`.
+        else opts.args[#opts.args + 1] = a
         end
         i = i + 1
     end
@@ -83,6 +86,9 @@ usage: hyprplace <command> [options]
   db            current learned state, newest first.
   diff          where the learned state and the current layout disagree.
   prune         entries the TTL would drop today. Dry run unless --apply.
+  forget PAT    entries whose key matches the Lua pattern PAT. Dry run unless
+                --apply. Matched against the key as the tools show it, so
+                `forget btop` matches `kitty + kitty btop`.
   watch         poll for window changes and print what hyprplace would do.
                 Ctrl-C to stop. Note a poller cannot see a change that is
                 undone within one interval.
@@ -93,7 +99,7 @@ options:
       --db PATH        state file to read
       --config PATH    config cache to read
       --no-config      ignore the cache; report against built-in defaults
-      --apply          prune only: actually write the pruned state
+      --apply          prune/forget: actually write the change
       --interval SEC   watch only: poll interval (default 0.25)
       --titles         watch only: report every title change, not just the ones
                        that change a window's identity
@@ -102,7 +108,8 @@ These tools read the configuration the running plugin resolved, so their verdict
 its behaviour. `db` prints which config it used; if the plugin has never loaded there is
 no cache and they fall back to defaults.
 
-Every command except `prune --apply` is read-only: they never dispatch to the compositor.
+Every command except `prune --apply` and `forget --apply` is read-only, and none of
+them ever dispatch to the compositor.
 ]])
 end
 
@@ -186,6 +193,40 @@ function commands.diff(cfg, opts)
         io.write(string.format("%-10s %-44s remembered %-16s live %s\n",
             r.status, CLI.show_key(r.key), show(r.remembered), show(r.actual)))
     end
+end
+
+function commands.forget(cfg, opts)
+    local pattern = opts.args[1]
+    if not pattern then
+        die("forget needs a pattern, e.g. hyprplace forget '^kitty$'")
+    end
+    if opts.args[2] then
+        die("forget takes one pattern; quote it if it contains spaces")
+    end
+
+    local state = DB.load(cfg.db_path)
+    local rows, err = CLI.forget_rows(state, pattern)
+    if err then die(err) end
+
+    io.write(string.format("state: %s\n%d entr%s matching %q\n\n",
+        cfg.db_path, #rows, #rows == 1 and "y" or "ies", pattern))
+    for _, r in ipairs(rows) do
+        local ws = {}
+        for _, id in ipairs(r.workspaces) do ws[#ws + 1] = tostring(id) end
+        io.write(string.format("%-44s ws %s\n", r.shown, table.concat(ws, ",")))
+    end
+    if #rows == 0 then
+        return
+    end
+
+    if not opts.apply then
+        io.write("\ndry run; pass --apply to remove them\n")
+        return
+    end
+    local removed = CLI.forget(state, rows)
+    local ok, werr = DB.save(cfg.db_path, state)
+    if not ok then die("could not write state: " .. tostring(werr)) end
+    io.write(string.format("\nremoved %d entr%s\n", removed, removed == 1 and "y" or "ies"))
 end
 
 function commands.prune(cfg, opts)

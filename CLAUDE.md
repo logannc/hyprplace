@@ -46,6 +46,9 @@ that are not obvious from the code.
 Docs *without* the `.required` marker are optional — read them when the task makes them
 relevant. Currently:
 
+- [docs/OBSERVED.md](docs/OBSERVED.md) — how Hyprland actually behaves, measured or read
+  from its source. Several entries reverse what the API's shape suggests; check here
+  before assuming.
 - [docs/FUTURE.md](docs/FUTURE.md) — near-term work and the post-MVP feature exploration
   backlog.
 - [docs/FIREFOX-TAGS.md](docs/FIREFOX-TAGS.md) — design for a WebExtension that gives

@@ -1731,6 +1731,61 @@ do
     ok(#CLI.short_title(string.rep("x", 100), 20) <= 22, "long titles are truncated")
 end
 
+group("cli.forget_rows")
+do
+    local state = DB.empty()
+    DB.observe(state, "kitty", { 11, 13 }, 100)
+    DB.observe(state, "kitty\0kitty btop", { 21 }, 100)
+    DB.observe(state, "firefox", { 3 }, 100)
+    DB.observe(state, "firefox\0tag:work", { 5 }, 100)
+
+    -- Matched against the rendered key: a raw key joins its parts with NUL, which
+    -- cannot be typed at a shell, so the only matchable form is the one displayed.
+    local rows = CLI.forget_rows(state, "btop")
+    eq(#rows, 1, "a substring of the cmdline half matches")
+    eq(rows[1].key, "kitty\0kitty btop", "and yields the raw key for deletion")
+    eq(rows[1].shown, "kitty + kitty btop", "alongside the rendered one for display")
+
+    eq(#CLI.forget_rows(state, "^kitty"), 2, "a prefix matches both kitty entries")
+    eq(#CLI.forget_rows(state, "^kitty$"), 1, "anchored, only the bare one")
+    eq(#CLI.forget_rows(state, "tag:"), 1, "tag keys are matchable too")
+    eq(#CLI.forget_rows(state, "^nope$"), 0, "no match is not an error")
+
+    local sorted = CLI.forget_rows(state, "")
+    eq(select(2, CLI.forget_rows(state, "")), "a pattern is required",
+        "an empty pattern is refused rather than matching everything")
+    eq(#sorted, 0, "and matches nothing")
+
+    local _, err = CLI.forget_rows(state, "(")
+    ok(err ~= nil and err:find("bad pattern", 1, true) ~= nil,
+        "a malformed pattern is reported, not thrown")
+
+    -- Ordered so the dry run reads the same way twice.
+    local all = CLI.forget_rows(state, ".")
+    eq(all[1].shown, "firefox", "rows are sorted by displayed key")
+end
+
+group("cli.forget")
+do
+    local state = DB.empty()
+    DB.observe(state, "kitty", { 11 }, 100)
+    DB.observe(state, "kitty\0kitty btop", { 21 }, 100)
+    DB.observe(state, "firefox", { 3 }, 100)
+
+    local removed = CLI.forget(state, CLI.forget_rows(state, "^kitty"))
+    eq(removed, 2, "both matching entries are removed")
+    eq(state.entries["kitty"], nil, "gone")
+    eq(state.entries["kitty\0kitty btop"], nil, "gone too")
+    ok(state.entries["firefox"] ~= nil, "and nothing else was touched")
+
+    eq(CLI.forget(state, {}), 0, "removing nothing removes nothing")
+    eq(CLI.forget(state, { { key = "absent" } }), 0, "a key that is not there is not counted")
+
+    -- What survives has to survive a round trip, since that is what gets written.
+    local back = DB.deserialize(DB.serialize(state))
+    eq(back.entries["firefox"].workspaces[1], 3, "the remainder still serializes")
+end
+
 group("cli.show_key")
 do
     eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")
