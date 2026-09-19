@@ -324,14 +324,12 @@ end
 
 -- ------------------------------------------------------------------------- presentation
 
---- A key contains a NUL between class and cmdline; render it readably.
+--- A key as a human should read it. Delegates to Identity so the tools and the
+--- plugin's own log cannot render the same key two different ways.
 ---@param key string|nil
 ---@return string
 function M.show_key(key)
-    if not key then
-        return "(none)"
-    end
-    return (key:gsub("%z", " + "))
+    return Identity.render(key)
 end
 
 return M

@@ -175,6 +175,21 @@ function M.key_for(w, windows, cfg)
     return class, "class"
 end
 
+--- A key as a human should read it.
+---
+--- Keys join their parts with NUL, which is invisible in a terminal: an unrendered
+--- `org.kde.dolphin\0dolphin /home/logan` reads as `org.kde.dolphindolphin /home/logan`,
+--- which looks like a parsing bug that is not there. Lives here rather than in the CLI
+--- because the plugin logs keys too, and the two must render them the same way.
+---@param key string|nil
+---@return string
+function M.render(key)
+    if not key or key == "" then
+        return "(none)"
+    end
+    return (key:gsub("%z", " + "))
+end
+
 --- Does this window have an identity of its own, beyond its class?
 ---
 --- Used by `require_cmdline`, whose name predates tags: the question it is really

@@ -15,6 +15,19 @@
 -- tested. Only the filesystem primitives shell out.
 
 local ROOT = (debug.getinfo(1, "S").source:sub(2)):match("^(.*)/[^/]*$") or "."
+if ROOT:sub(1, 1) ~= "/" then
+    -- Invoked as ./install.lua, so ROOT is "." and every path it prints is relative to
+    -- a directory the reader has to infer. A preview of a file copy has to say where
+    -- the bytes come from as plainly as where they land.
+    local pwd = io.popen("pwd")
+    if pwd then
+        local cwd = (pwd:read("l") or ""):gsub("/$", "")
+        pwd:close()
+        if cwd ~= "" then
+            ROOT = (ROOT == "." or ROOT == "") and cwd or (cwd .. "/" .. ROOT)
+        end
+    end
+end
 local Installer = dofile(ROOT .. "/installer.lua")
 
 local q = Installer.shell_quote

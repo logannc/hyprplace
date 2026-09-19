@@ -185,7 +185,7 @@ end
 --- a different moment, acts through exactly the same code.
 local function apply(w, verdict)
     if verdict.outcome == "skip" then
-        log("skip %s: %s", tostring(verdict.key), verdict.detail)
+        log("skip %q: %s", Identity.render(verdict.key), verdict.detail)
         return
     end
 
@@ -202,7 +202,7 @@ local function apply(w, verdict)
     -- Note: the target workspace need not exist yet. At session start most workspaces
     -- do not, and Hyprland creates one on demand -- which is exactly what we want when
     -- restoring after a reboot.
-    log("placing %q -> workspace %d", tostring(verdict.key), verdict.target)
+    log("placing %q -> workspace %d", Identity.render(verdict.key), verdict.target)
     M._guard = true
     local ok, err = pcall(function()
         hl.dispatch(hl.dsp.window.move({ window = w, workspace = verdict.target, follow = false }))
@@ -324,7 +324,7 @@ local function place(w)
     local windows = hl.get_windows()
     local verdict = Placement.decide(w, windows, M._state, M._cfg)
     if verdict.outcome == "defer" then
-        log("defer %s: %s", tostring(verdict.class), verdict.detail)
+        log("defer %q: %s", tostring(verdict.class), verdict.detail)
         defer(w)
         return
     end
@@ -357,7 +357,15 @@ local function remember(w, ws_id, why)
     local distribution = Learn.distribution(w, windows, ws_id, key, key_fn(windows))
 
     DB.observe(M._state, key, distribution, os.time())
-    log("learned (%s) %q -> %d window(s)", why, key, #distribution)
+    -- Say where, not just how many. "1 window(s)" records the shape of the
+    -- observation and omits its content, which is the part worth reading back.
+    local ws = {}
+    for _, id in ipairs(distribution) do
+        ws[#ws + 1] = tostring(id)
+    end
+    log("learned (%s) %q -> workspace%s %s (%d window%s)", why, Identity.render(key),
+        #ws == 1 and "" or "s", table.concat(ws, ","),
+        #distribution, #distribution == 1 and "" or "s")
     schedule_save()
 end
 

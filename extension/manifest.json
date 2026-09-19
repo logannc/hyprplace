@@ -5,12 +5,18 @@
   "version": "0.1.0",
   "browser_specific_settings": {
     "gecko": {
-      "id": "hypr-tags@hyprplace.invalid",
+      "id": "hypr-tags@lcspace.net",
       "strict_min_version": "115.0"
     }
   },
-  "permissions": ["sessions"],
-  "background": { "scripts": ["background.js"] },
+  "permissions": [
+    "sessions"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
   "browser_action": {
     "default_title": "Window tag",
     "default_popup": "popup.html"

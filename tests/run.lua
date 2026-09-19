@@ -725,6 +725,59 @@ do
     eq(Tag.strip(nil), "", "nil renders as empty")
 end
 
+-- ------------------------------------------------------------------ the plugin's log
+
+group("identity.render")
+do
+    eq(Identity.render("firefox\0tag:work"), "firefox + tag:work", "a tag key")
+    eq(Identity.render("org.kde.dolphin\0dolphin /home/logan"),
+        "org.kde.dolphin + dolphin /home/logan",
+        "the NUL is shown, not left invisible to run two words together")
+    eq(Identity.render("firefox"), "firefox", "a plain key is unchanged")
+    eq(Identity.render(nil), "(none)", "nothing")
+    eq(Identity.render(""), "(none)", "empty")
+end
+
+group("the log records what happened, not just that it did")
+do
+    local log_path = tmpfile()
+    local w = support.window({ class = "okular", address = "0xa", workspace = 3 })
+    local hp, h = fresh({ w }, { debug = true, log_path = log_path })
+
+    local function log_text()
+        local f = assert(io.open(log_path, "r"))
+        local text = f:read("a")
+        f:close()
+        return text
+    end
+
+    ok(log_text():find("ready", 1, true) ~= nil,
+        "loading is recorded even before anything happens")
+
+    h.flush_timers() -- let the startup freeze lapse
+    w.workspace = { id = 6 }
+    h.handlers["window.move_to_workspace"](w, { id = 6 })
+
+    local text = log_text()
+    ok(text:find("learned", 1, true) ~= nil, "a learned move is recorded")
+    ok(text:find("workspace 6", 1, true) ~= nil,
+        "including which workspace -- the fact the line exists to record")
+
+    -- An error must reach the file whatever `debug` says; AC-6 contains failures, and
+    -- a contained failure nobody can see is barely better than a crash.
+    local quiet_log = tmpfile()
+    local hp2, h2 = fresh({}, { debug = false, log_path = quiet_log })
+    local hostile = setmetatable({}, { __index = function() error("boom") end })
+    h2.handlers["window.open_early"](hostile)
+
+    local f = assert(io.open(quiet_log, "r"))
+    local quiet = f:read("a")
+    f:close()
+    ok(quiet:find("error in open_early", 1, true) ~= nil,
+        "the error is written with debug off")
+    ok(quiet:find("skip", 1, true) == nil, "but the verbose tracing is not")
+end
+
 -- ------------------------------------------------------- workspace ids from the wild
 
 group("workspace ids are unwrapped, whatever shape they arrive in")

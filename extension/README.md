@@ -34,21 +34,48 @@ hyprplace never sets or renames a tag -- there is no channel in that direction.
 - A rename is just a title change to a new tag. The plugin treats it as a new identity;
   the old one expires under the TTL on its own.
 
-## Status: not signed, not installed, development only
+## Status: not yet signed
 
-`gecko.id` is **`hypr-tags@hyprplace.invalid`, a placeholder**. The id is bound to the
-AMO account that signs the extension and cannot change afterwards, so it must be settled
-before the first signing run -- deliberately deferred until there is something worth
-signing. `.invalid` is a reserved TLD, so the current value cannot collide with a real
-extension and cannot be mistaken for a decision that has been made.
+`gecko.id` is **`hypr-tags@lcspace.net`**, bound to the AMO account that signs it. It
+can technically be changed while the extension is unlisted and undistributed -- a new id
+is simply a new extension, and nobody has the old one installed -- but after the first
+signing run it is a decision with consequences, so treat it as settled.
 
-Release Firefox loads only signed extensions. Until then this runs in a scratch profile:
+Signing is **unlisted / self-distributed**: the extension never appears on AMO, and the
+signed `.xpi` comes back for direct download. Release Firefox loads only signed
+extensions, so this is what makes it installable in a normal profile.
+
+```sh
+npx web-ext lint -s extension                              # always, before signing
+npx web-ext sign -s extension -a dist --channel unlisted   # burns the version number
+```
+
+`web-ext sign` reads two environment variables, which are the two halves of the AMO API
+credential under different names:
+
+| web-ext | AMO developer hub calls it | shape |
+|---|---|---|
+| `WEB_EXT_API_KEY` | **JWT issuer** | `user:12345678:123` |
+| `WEB_EXT_API_SECRET` | **JWT secret** | 64 hex characters |
+
+**A version string can be signed exactly once.** A failed submission burns it, so lint
+first and bump `manifest.json` rather than retrying the same number.
+
+Installing the result in a normal profile needs no root and no enterprise policy -- open
+the `.xpi` (`firefox /path/to/hypr-tags.xpi`) and accept the prompt. The
+`policies.json` path described in ../docs/FIREFOX-TAGS.md is for installing it on
+*other people's* machines, and is not needed to run it on your own.
+
+For development, no signing is required:
 
 ```sh
 npx web-ext run -s extension          # scratch profile, auto-reload, no signing
 ```
 
-That opens a real Firefox window, and `-s extension` must point at this directory.
+That opens a real Firefox window in a throwaway profile, and `-s extension` must point
+at this directory. Add `--profile-path <dir> --keep-profile-changes` to reuse a profile
+across runs, which is what makes session restore -- and so tag persistence -- testable
+without signing anything.
 
 Verify from the compositor side:
 
