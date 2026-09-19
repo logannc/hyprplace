@@ -129,10 +129,9 @@ Learning is frozen -- placement is not -- during two periods:
   both at boot and on every `hyprctl reload`. In that window the compositor, hyprsplit's
   workspace reflow, and autostart all move windows around; none of it is user intent.
   Freezing from `setup()` rather than from the `hyprland.start` event avoids depending on
-  handler ordering against hyprsplit. Freezes can overlap -- two reloads in quick
-  succession -- and the later, longer one must win; otherwise the first timer to fire
-  ends a freeze it does not own, and two overlapping freezes protect for less time than
-  either alone.
+  handler ordering against hyprsplit. Exactly one freeze exists per VM, since a reload
+  recreates the VM and takes any pending timer with it, so nothing has to arbitrate
+  between overlapping freezes.
 
 > **Monitor hotplug is deliberately not a trigger**, though an earlier version froze on
 > `monitor.added`/`removed`. A hotplug migrates whole *workspaces* between monitors;

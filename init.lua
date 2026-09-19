@@ -32,9 +32,6 @@ local M = {
     -- -- because the compositor, hyprsplit and autostart all move windows then, and
     -- none of it is user intent.
     _settling = false,
-    -- When the current freeze ends, and which timer owns it. See begin_settle.
-    _settle_until = nil,
-    _settle_gen = 0,
     -- Set once the compositor is shutting down. Teardown closes every window, and
     -- monitors are removed first, so workspaces reflow and windows pile up. Recording
     -- any of that would overwrite good state with garbage on the way out.
@@ -433,35 +430,20 @@ local function on_close(w)
     remember(w, workspace_id(w and w.workspace), "close")
 end
 
---- Freeze learning for `ms`, or until an existing longer freeze expires.
+--- Freeze learning for `ms`.
 ---
---- Freezes overlap: `hyprctl reload` twice in quick succession starts a second while
---- the first is still running. The naive version ends on whichever timer fires first,
---- whatever freeze it belonged to, so two overlapping freezes protect for less time
---- than either alone -- exactly backwards.
+--- Called exactly once per VM. setup() runs during config load, and `hyprctl reload`
+--- destroys and recreates the Lua VM (docs/OBSERVED.md), taking any pending timer with
+--- it -- so freezes cannot overlap and nothing has to arbitrate between them.
 ---
---- Deadlines are compared in whole seconds, which is ample for freezes measured in
---- seconds, and avoids needing a monotonic clock we do not have.
+--- An earlier version tracked deadlines and generations so a later, longer freeze would
+--- win. That was only ever reachable because monitor hotplug started a second, shorter
+--- freeze, and that trigger has since been removed as guarding nothing: a hotplug moves
+--- workspaces between monitors, not windows between workspaces.
 local function begin_settle(ms)
     M._settling = true
-
-    local deadline = os.time() + (ms / 1000)
-    if M._settle_until and deadline <= M._settle_until then
-        return -- an existing freeze already covers this one; nothing more to schedule
-    end
-    M._settle_until = deadline
-
-    -- A timer cannot be cancelled (HL.Timer has no such method), so a superseded one
-    -- is ignored when it fires rather than retracted.
-    M._settle_gen = (M._settle_gen or 0) + 1
-    local gen = M._settle_gen
-
     hl.timer(guarded("settle", function()
-        if gen ~= M._settle_gen then
-            return -- a longer freeze started after this one and is still running
-        end
         M._settling = false
-        M._settle_until = nil
         log("settled; learning resumed")
     end), { timeout = ms, type = "oneshot" })
 end
