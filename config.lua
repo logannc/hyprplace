@@ -19,6 +19,15 @@ function M.defaults()
         cache_path = os.getenv("HYPRPLACE_CONFIG_CACHE")
             or (state_home() .. "/hyprplace/config.lua"),
 
+        -- Where hyprplace writes its own log. It cannot rely on print(): Lua output
+        -- goes through Hyprland's logger, and `debug:disable_logs` defaults to true,
+        -- so on `hyprctl reload` every message -- including errors -- is swallowed.
+        --
+        -- Errors are always written here. Everything else only when `debug` is on.
+        -- Set to false to disable the file entirely.
+        log_path = os.getenv("HYPRPLACE_LOG")
+            or (state_home() .. "/hyprplace/hyprplace.log"),
+
         -- Entries not seen within this many days are dropped when the DB loads.
         ttl_days = 90,
 

@@ -341,9 +341,35 @@ end
 
 -- ----------------------------------------------------------------- handlers via hl
 
--- Everything the suite writes, removed at the end. setup() writes a config cache as
--- well as the state file, and without an explicit override that cache lands in the
--- user's real ~/.local/state/hyprplace -- which running the tests must never touch.
+-- Everything the suite writes, removed at the end. setup() writes a state file, a
+-- config cache and a log, and without explicit overrides they land in the user's real
+-- ~/.local/state/hyprplace -- which running the tests must never touch.
+--
+-- Snapshotted before anything runs rather than checked for absence at the end: on a
+-- machine where hyprplace is actually installed these files exist and are none of the
+-- suite's business. What must not happen is the suite changing them.
+local function snapshot(path)
+    local f = io.open(path, "rb")
+    if not f then
+        return false, nil
+    end
+    local text = f:read("a")
+    f:close()
+    return true, text
+end
+
+local REAL_PATHS = {}
+do
+    local d = Config.defaults()
+    for _, path in ipairs({ d.db_path, d.cache_path, d.log_path }) do
+        if path then
+            local existed, content = snapshot(path)
+            REAL_PATHS[#REAL_PATHS + 1] =
+                { path = path, existed = existed, content = content }
+        end
+    end
+end
+
 local tmpfiles = {}
 local function tmpfile()
     local path = os.tmpname()
@@ -358,6 +384,7 @@ local function fresh(windows, user_cfg)
     local cfg = user_cfg or {}
     cfg.db_path = cfg.db_path or tmpfile()
     cfg.cache_path = cfg.cache_path or tmpfile()
+    cfg.log_path = cfg.log_path == nil and tmpfile() or cfg.log_path
     local hp = require("hyprplace").setup(cfg)
     return hp, h, cfg.db_path
 end
@@ -696,6 +723,89 @@ do
     eq(Tag.strip("Inbox"), "Inbox", "an untagged title is unchanged")
     eq(Tag.strip("[has space] x"), "[has space] x", "a non-tag prefix is left alone")
     eq(Tag.strip(nil), "", "nil renders as empty")
+end
+
+-- ------------------------------------------------------- workspace ids from the wild
+
+group("workspace ids are unwrapped, whatever shape they arrive in")
+do
+    local hp = fresh({})
+    local id_of = hp._workspace_id
+    ok(id_of ~= nil, "the resolver is reachable")
+
+    eq(id_of(7), 7, "a plain number")
+    eq(id_of({ id = 7 }), 7, "a table with an id")
+    eq(id_of(nil), nil, "nothing")
+    eq(id_of({}), nil, "a table with no id")
+    eq(id_of("22"), nil, "a string is not an id, even a numeric-looking one")
+    eq(id_of(true), nil, "a value that cannot be indexed at all")
+    eq(id_of({ id = "22" }), nil, "an id that is not a number")
+
+    -- The live failure: Hyprland hands over an HL.Workspace *userdata*, so a
+    -- `type(ws) == "table"` check falls through and yields the object itself. Real
+    -- userdata cannot be built from pure Lua, so this cannot be reproduced exactly --
+    -- which is precisely why the implementation is duck-typed on `.id` rather than
+    -- testing the type. What is reproducible is the damage it caused; see below.
+    local proxy = setmetatable({}, { __index = function(_, k)
+        if k == "id" then return 22 end
+    end })
+    eq(id_of(proxy), 22, "an object that only answers through __index")
+end
+
+group("the DB refuses ids it could not read back")
+do
+    -- Exactly what reached the state file on the first live run:
+    --   ["steam"] = { workspaces = { HL.Workspace(22:22) }, seen = ... }
+    -- tostring() on a workspace object produced a token that is not Lua, so the next
+    -- load() failed and silently emptied the entire DB.
+    local hl_workspace = setmetatable({ id = 22 }, {
+        __tostring = function() return "HL.Workspace(22:22)" end,
+    })
+
+    local state = DB.empty()
+    DB.observe(state, "steam", { hl_workspace }, 100)
+    eq(next(state.entries), nil, "an unusable id is dropped rather than stored")
+
+    -- The invariant that matters, independent of how a bad value got in: whatever is
+    -- in the table, what we write must be readable.
+    local hostile = DB.empty()
+    hostile.entries["steam"] = {
+        workspaces = { 3, hl_workspace, "22", true, 4.0 }, seen = 100,
+    }
+    local text = DB.serialize(hostile)
+    local back, corrupt = DB.deserialize(text)
+    ok(not corrupt, "serialized output always parses")
+    eq(back.entries["steam"].workspaces[1], 3, "the good ids survive")
+    eq(#back.entries["steam"].workspaces, 2, "and the three unusable ones are gone")
+    eq(back.entries["steam"].workspaces[2], 4, "a float id is written as an integer")
+
+    DB.observe(state, "ok", { 3, 4 }, 100)
+    eq(#state.entries["ok"].workspaces, 2, "ordinary ids are unaffected")
+end
+
+group("a corrupt state file is reported, not silently swallowed")
+do
+    local _, corrupt = DB.deserialize("return { version = 1, entries = { x = HL.Foo(1) } }")
+    ok(corrupt, "unparseable content is flagged")
+
+    local _, c2 = DB.deserialize("")
+    ok(not c2, "an empty file is a first run, not corruption")
+    local _, c3 = DB.deserialize(nil)
+    ok(not c3, "nor is a missing one")
+    local _, c4 = DB.deserialize("return 5")
+    ok(c4, "valid Lua of the wrong shape is corruption")
+
+    local state, c5 = DB.deserialize(DB.serialize(DB.empty()))
+    ok(not c5, "our own output round trips clean")
+    eq(next(state.entries), nil, "as empty")
+
+    local path = tmpfile()
+    local f = assert(io.open(path, "w"))
+    f:write("this is not lua")
+    f:close()
+    local loaded, c6 = DB.load(path)
+    ok(c6, "load reports it too")
+    eq(next(loaded.entries), nil, "and falls back to empty")
 end
 
 -- --------------------------------------------------------------- identity: tag tier
@@ -1681,12 +1791,19 @@ end
 
 group("the suite writes nothing outside its temp files")
 do
-    -- setup() writes a config cache, so a test that forgets to override cache_path
+    -- setup() writes three files, so a test that forgets to override one of the paths
     -- would silently write into the user's real state directory. This is the backstop.
-    for _, path in ipairs({ Config.defaults().db_path, Config.defaults().cache_path }) do
-        local f = io.open(path, "r")
-        if f then f:close() end
-        ok(f == nil, "the real " .. path:match("[^/]+$") .. " was not created")
+    for _, before in ipairs(REAL_PATHS) do
+        local existed, content = snapshot(before.path)
+        local name = before.path:match("[^/]+$")
+        if existed == before.existed and content == before.content then
+            ok(true, "the real " .. name .. " is untouched")
+        else
+            -- A running hyprplace writing its own state mid-run would also land here,
+            -- so say so rather than asserting the suite is guilty.
+            ok(false, "the real " .. name .. " changed during the run"
+                .. " (a test wrote it, or an installed hyprplace did)")
+        end
     end
 end
 

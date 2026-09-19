@@ -43,7 +43,11 @@ function M.serialize(state)
         local e = state.entries[k]
         local ws = {}
         for _, id in ipairs(e.workspaces or {}) do
-            ws[#ws + 1] = tostring(id)
+            -- Belt and braces with observe(): serialize must never emit a token that
+            -- cannot be read back, whatever put it in the table.
+            if type(id) == "number" then
+                ws[#ws + 1] = string.format("%d", math.floor(id))
+            end
         end
         out[#out + 1] = string.format(
             "    [%s] = { workspaces = { %s }, seen = %d },",
@@ -57,22 +61,26 @@ end
 
 --- Parse serialized state. Returns an empty DB on any problem rather than throwing --
 --- a corrupt DB must never take the compositor down with it.
+---
+--- The second return value says whether there was something there that could not be
+--- read. Falling back to empty is right, but doing it silently means a state file
+--- destroyed by a bug looks exactly like a first run, which is how such a bug survives.
 ---@param text string|nil
----@return table
+---@return table state, boolean corrupt
 function M.deserialize(text)
     if not text or text == "" then
-        return empty()
+        return empty(), false
     end
     local chunk = load(text, "hyprplace-db", "t", {})
     if not chunk then
-        return empty()
+        return empty(), true
     end
     local ok, value = pcall(chunk)
     if not ok or type(value) ~= "table" or type(value.entries) ~= "table" then
-        return empty()
+        return empty(), true
     end
     value.version = value.version or M.VERSION
-    return value
+    return value, false
 end
 
 --- Drop entries not seen within `ttl_days`.
@@ -96,11 +104,11 @@ function M.prune(state, ttl_days, now)
 end
 
 ---@param path string
----@return table
+---@return table state, boolean corrupt
 function M.load(path)
     local f = io.open(path, "r")
     if not f then
-        return empty()
+        return empty(), false
     end
     local text = f:read("a")
     f:close()
@@ -162,9 +170,20 @@ function M.observe(state, key, workspaces, now)
     if not key or not workspaces or #workspaces == 0 then
         return
     end
+    -- Only real workspace ids. Anything else -- most plausibly an HL.Workspace object
+    -- that should have been unwrapped -- would serialize to something `load()` cannot
+    -- parse, which silently empties the whole DB on the next read. Dropping the bad
+    -- value costs one observation; writing it costs everything.
     local sorted = {}
     for _, id in ipairs(workspaces) do
-        sorted[#sorted + 1] = id
+        if math.type(id) == "integer" then
+            sorted[#sorted + 1] = id
+        elseif type(id) == "number" and id == math.floor(id) then
+            sorted[#sorted + 1] = math.floor(id)
+        end
+    end
+    if #sorted == 0 then
+        return
     end
     table.sort(sorted)
 

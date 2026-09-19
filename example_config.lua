@@ -42,6 +42,23 @@ return {
     --
     --   cache_path = os.getenv("HOME") .. "/.local/state/hyprplace/config.lua",
 
+    -- Where hyprplace writes its own log.
+    --
+    -- It cannot rely on print(): Lua output goes through Hyprland's logger, and
+    -- `debug:disable_logs` defaults to true, so after `hyprctl reload` nothing reaches
+    -- the Hyprland log at all -- errors included. This file is hyprplace's own, and is
+    -- unaffected by that setting.
+    --
+    -- Errors and a one-line "ready" are always written. Everything else only when
+    -- `debug` is on. Set to false to write no file at all. Truncated once it passes
+    -- 1 MiB, so it cannot grow without bound.
+    --
+    -- Commented out because the default is computed: $HYPRPLACE_LOG, else
+    -- $XDG_STATE_HOME/hyprplace/hyprplace.log, else
+    -- ~/.local/state/hyprplace/hyprplace.log.
+    --
+    --   log_path = os.getenv("HOME") .. "/.local/state/hyprplace/hyprplace.log",
+
     -- Entries not seen within this many days are dropped when the DB loads. Stops
     -- state growing without bound as you install and remove software.
     ttl_days = 90,

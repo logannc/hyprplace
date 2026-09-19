@@ -48,6 +48,8 @@ local M = {
     -- cancel -- and a timer that fires after the user has moved the window would break
     -- AC-4. Deadlines are counted in sweep ticks so no wall clock is needed.
     _sweep = nil,
+    -- Our own log file; see open_log.
+    _log = nil,
     -- window.title fires for every title change of every window, so the subscription is
     -- held only while something is actually pending.
     _title_sub = nil,
@@ -56,10 +58,53 @@ local M = {
 -- ---------------------------------------------------------------------------
 -- logging
 
+-- Hyprland's Lua print() goes through its logger, and `debug:disable_logs` defaults to
+-- true -- so on `hyprctl reload` nothing reaches the log at all, errors included. A
+-- plugin that cannot report its own failures is a plugin you cannot debug, so hyprplace
+-- keeps its own file and prints as well, for whoever has Hyprland's logs turned on.
+local LOG_MAX_BYTES = 1024 * 1024
+
+local function open_log(path)
+    if not path then
+        return nil
+    end
+    -- Bounded without rotation machinery: start fresh once the file gets large, so a
+    -- long-running session with debug on cannot fill the disk.
+    local mode = "a"
+    local existing = io.open(path, "r")
+    if existing then
+        local size = existing:seek("end")
+        existing:close()
+        if size and size > LOG_MAX_BYTES then
+            mode = "w"
+        end
+    end
+    local f = io.open(path, mode)
+    if f then
+        f:setvbuf("line") -- a crash must not lose the lines explaining it
+    end
+    return f
+end
+
+local function emit(fmt, ...)
+    local line = "[hyprplace] " .. string.format(fmt, ...)
+    print(line)
+    if M._log then
+        M._log:write(os.date("%Y-%m-%d %H:%M:%S "), line, "\n")
+    end
+end
+
+--- Verbose tracing. Only when `debug` is on.
 local function log(fmt, ...)
     if M._cfg and M._cfg.debug then
-        print("[hyprplace] " .. string.format(fmt, ...))
+        emit(fmt, ...)
     end
+end
+
+--- Something went wrong. Always recorded, whatever `debug` says -- AC-6 contains
+--- failures, and a contained failure nobody can see is not much better than a crash.
+local function problem(fmt, ...)
+    emit(fmt, ...)
 end
 
 --- Wrap a handler so a failure is logged and contained (AC-6).
@@ -67,7 +112,7 @@ local function guarded(name, fn)
     return function(...)
         local ok, err = pcall(fn, ...)
         if not ok then
-            print(string.format("[hyprplace] error in %s: %s", name, tostring(err)))
+            problem("error in %s: %s", name, tostring(err))
         end
     end
 end
@@ -103,7 +148,7 @@ local function flush_save()
     M._dirty = false
     local ok, err = DB.save(M._cfg.db_path, M._state)
     if not ok then
-        print("[hyprplace] failed to save db: " .. tostring(err))
+        problem("failed to save db: %s", tostring(err))
     else
         log("saved %s", M._cfg.db_path)
     end
@@ -164,7 +209,7 @@ local function apply(w, verdict)
     end)
     M._guard = false
     if not ok then
-        print("[hyprplace] move failed: " .. tostring(err))
+        problem("move failed: %s", tostring(err))
     end
 end
 
@@ -322,6 +367,30 @@ local function frozen()
     return M._shutdown or M._settling
 end
 
+--- The workspace id from whatever the compositor handed us.
+---
+--- Hyprland passes an HL.Workspace *userdata*, not a table, so a `type(ws) == "table"`
+--- check silently falls through and yields the object itself -- which then reaches the
+--- DB and serializes as `HL.Workspace(22:22)`, producing a state file that cannot be
+--- loaded. Duck-typed rather than type-tested for exactly that reason: what matters is
+--- whether it carries an id, not what kind of value it is.
+---@param ws any
+---@return integer|nil
+local function workspace_id(ws)
+    if type(ws) == "number" then
+        return ws
+    end
+    if ws == nil then
+        return nil
+    end
+    local ok, id = pcall(function() return ws.id end)
+    if ok and type(id) == "number" then
+        return id
+    end
+    return nil
+end
+M._workspace_id = workspace_id
+
 local function on_move(w, ws)
     if M._guard then
         return -- our own placement echoing back
@@ -338,8 +407,7 @@ local function on_move(w, ws)
     if frozen() then
         return -- session start, reload or hotplug reflow: not user intent
     end
-    local id = ws and (type(ws) == "table" and ws.id or ws) or (w.workspace and w.workspace.id)
-    remember(w, id, "move")
+    remember(w, workspace_id(ws) or workspace_id(w and w.workspace), "move")
 end
 
 local function on_close(w)
@@ -351,9 +419,7 @@ local function on_close(w)
     end
     -- Essential for AC-1: a window the user never explicitly moved is only ever
     -- recorded here.
-    if w and w.workspace then
-        remember(w, w.workspace.id, "close")
-    end
+    remember(w, workspace_id(w and w.workspace), "close")
 end
 
 local function begin_settle(ms)
@@ -382,6 +448,15 @@ function M.setup(user_config)
     M._cfg = Config.build(user_config)
     DB.ensure_dir(M._cfg.db_path)
 
+    -- Opened first, so anything that goes wrong below is recorded.
+    if M._log then
+        M._log:close()
+    end
+    if M._cfg.log_path then
+        DB.ensure_dir(M._cfg.log_path)
+        M._log = open_log(M._cfg.log_path)
+    end
+
     -- Publish what we resolved so the CLI reports this plugin's behaviour rather than
     -- the defaults'. The user's config lives in hyprland.lua, which nothing but the
     -- compositor reads, so without this the tools and the plugin disagree the moment
@@ -391,11 +466,15 @@ function M.setup(user_config)
         DB.ensure_dir(M._cfg.cache_path)
         local saved, cerr = Cache.save(M._cfg.cache_path, M._cfg)
         if not saved then
-            print("[hyprplace] failed to write the config cache: " .. tostring(cerr))
+            problem("failed to write the config cache: %s", tostring(cerr))
         end
     end
 
-    local state = DB.load(M._cfg.db_path)
+    local state, corrupt = DB.load(M._cfg.db_path)
+    if corrupt then
+        problem("state file at %s could not be read and was ignored; "
+            .. "starting from empty", M._cfg.db_path)
+    end
     local dropped
     state, dropped = DB.prune(state, M._cfg.ttl_days, os.time())
     M._state = state
@@ -426,7 +505,7 @@ function M.setup(user_config)
     -- event instead would depend on handler ordering against hyprsplit's reflow.
     begin_settle(M._cfg.startup_settle_ms)
 
-    log("ready (db=%s, %d entries)", M._cfg.db_path, (function()
+    emit("ready (db=%s, %d entries)", M._cfg.db_path, (function()
         local n = 0
         for _ in pairs(M._state.entries) do n = n + 1 end
         return n
