@@ -2,11 +2,16 @@
   "manifest_version": 2,
   "name": "hypr-tags",
   "description": "Prefixes each Firefox window title with a persistent tag so a Wayland compositor can identify windows across restarts.",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "browser_specific_settings": {
     "gecko": {
       "id": "hypr-tags@lcspace.net",
-      "strict_min_version": "115.0"
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   },
   "permissions": [

@@ -111,6 +111,18 @@ extension/
 `gecko.id` must be fixed before the first signing run; it is bound to the AMO
 account that signs it and cannot change afterward.
 
+> **As built, this differs** — see `extension/manifest.json`. The id is
+> `hypr-tags@lcspace.net`, the version starts at `0.0.1`, and two keys were added
+> to clear `web-ext lint`:
+>
+> - `data_collection_permissions: { required: ["none"] }`. Mozilla now requires every
+>   extension to declare what it collects, and omitting the key reads as *undeclared*
+>   rather than as *nothing*. hypr-tags collects nothing: tags are random hex generated
+>   in the browser, stored in its own session store, and never sent anywhere.
+> - `strict_min_version` raised from `115.0` to `142.0`, the release that introduced
+>   that key. Declaring an older floor than the features the manifest uses is what lint
+>   objected to, and 142 costs nothing here.
+
 ### background.js
 
 ```js
