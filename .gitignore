@@ -1,3 +1,4 @@
 *.log
+dist/
 extension/web-ext-artifacts/
 extension/node_modules/
