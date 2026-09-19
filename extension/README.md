@@ -34,12 +34,26 @@ hyprplace never sets or renames a tag -- there is no channel in that direction.
 - A rename is just a title change to a new tag. The plugin treats it as a new identity;
   the old one expires under the TTL on its own.
 
-## Status: not yet signed
+## Where it lives
 
-`gecko.id` is **`hypr-tags@lcspace.net`**, bound to the AMO account that signs it. It
-can technically be changed while the extension is unlisted and undistributed -- a new id
-is simply a new extension, and nobody has the old one installed -- but after the first
-signing run it is a decision with consequences, so treat it as settled.
+| | |
+|---|---|
+| Extension id | `hypr-tags@lcspace.net` |
+| Signing account | `logan@lcspace.net` |
+| Distribution | Unlisted; the signed `.xpi` is attached to GitHub releases |
+
+**To install it**, download the `.xpi` from a release and open it in Firefox
+(`firefox hypr-tags-<version>.xpi`) -- it installs with the normal prompt, no root and
+no enterprise policy needed. Or build your own from source; see below.
+
+Unlisted means the add-on is not in Mozilla's public directory and is not searchable.
+Signed builds stay downloadable from the signing account's AMO developer dashboard,
+which is where to re-fetch one if a local `dist/` is lost.
+
+## Status
+
+`gecko.id` is **`hypr-tags@lcspace.net`**, bound to the AMO account that signs it, and
+now **settled**: `0.0.1` has been signed under it.
 
 Signing is **unlisted / self-distributed**: the extension never appears on AMO, and the
 signed `.xpi` comes back for direct download. Release Firefox loads only signed
