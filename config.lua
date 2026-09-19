@@ -37,6 +37,17 @@ function M.defaults()
             "^hyprland%-run$",
         },
 
+        -- Skip floating windows entirely: never remembered, never placed.
+        --
+        -- A floating window is usually transient -- a dialog, a picker, an unlock
+        -- prompt -- and those belong wherever your focus is, which is where they open
+        -- on their own. Remembering one also poisons its app's entry: a password
+        -- manager's unlock dialog shares a class with its main window, so learning both
+        -- records the app as living on two workspaces and sends the next dialog to one.
+        --
+        -- Set false if you float windows you genuinely want placed.
+        ignore_floating = true,
+
         -- Lua patterns matched against each of a window's Hyprland tags, lowercased.
         -- A window carrying a matching tag is never remembered and never placed.
         --

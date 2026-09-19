@@ -72,6 +72,19 @@ return {
         "^hyprland%-run$",
     },
 
+    -- Skip floating windows entirely: never remembered, never placed.
+    --
+    -- On by default, because a floating window is usually transient -- a dialog, a
+    -- picker, an unlock prompt -- and those belong wherever your focus is, which is
+    -- where they already open. Remembering one does more than waste an entry: a
+    -- dialog usually shares a class with the app's main window, so learning both
+    -- records the app as living on two workspaces and sends the next dialog to one
+    -- of them instead of leaving it alone.
+    --
+    -- Turn it off if you float windows you genuinely want placed. Note that hyprplace
+    -- then goes quiet for a workflow where everything floats.
+    ignore_floating = true,
+
     -- Lua patterns matched against each of a window's Hyprland tags, lowercased. A
     -- window carrying a matching tag is never remembered and never placed.
     --

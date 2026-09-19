@@ -725,6 +725,52 @@ do
     eq(Tag.strip(nil), "", "nil renders as empty")
 end
 
+-- ------------------------------------------------------------------ ignore_floating
+
+group("floating windows are skipped by default")
+do
+    local cfg = Config.build({})
+    ok(cfg.ignore_floating, "the default is on")
+
+    -- The case it exists for: an unlock dialog shares a class with the main window,
+    -- so remembering it teaches hyprplace the app lives on two workspaces and the next
+    -- dialog gets sent to one of them.
+    local dialog = support.window({ class = "myvault", address = "0xa", workspace = 3,
+        floating = true })
+    local main = support.window({ class = "myvault", address = "0xb", workspace = 14 })
+
+    local tracked, reason = Policy.decide(dialog, { dialog, main }, cfg)
+    ok(not tracked, "the floating dialog is not tracked")
+    eq(reason, Policy.IGNORED_FLOAT, "and says why")
+    ok(Policy.decide(main, { dialog, main }, cfg), "the tiled main window still is")
+
+    eq(Placement.decide(dialog, { dialog, main }, DB.empty(), cfg).outcome, "skip",
+        "so it is never placed")
+
+    local off = Config.build({ ignore_floating = false })
+    ok(Policy.decide(dialog, { dialog }, off), "and it can be turned off")
+
+    -- Absent rather than false: a window list that does not carry the field at all
+    -- must not be read as "everything is floating".
+    local unknown = support.window({ class = "kitty", address = "0xc", workspace = 3 })
+    unknown.floating = nil
+    ok(Policy.decide(unknown, { unknown }, cfg), "an unknown floating state is not excluded")
+end
+
+group("a floating dialog is not learned from")
+do
+    local dialog = support.window({ class = "myvault", address = "0xa", workspace = 3,
+        floating = true })
+    local hp, h = fresh({ dialog })
+    h.flush_timers() -- let the startup freeze lapse
+
+    h.handlers["window.move_to_workspace"](dialog, { id = 5 })
+    eq(next(hp.state().entries), nil, "moving it records nothing")
+
+    h.handlers["window.close"](dialog)
+    eq(next(hp.state().entries), nil, "and neither does closing it")
+end
+
 -- --------------------------------------------------------------------- ignore_tags
 
 group("policy.tags_of")

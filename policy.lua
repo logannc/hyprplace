@@ -12,6 +12,7 @@ local M = {}
 M.OK            = "ok"
 M.NO_CLASS      = "no-class"
 M.IGNORED       = "ignored-class"
+M.IGNORED_FLOAT = "floating"
 M.IGNORED_TAG   = "ignored-tag"
 M.NEEDS_CMDLINE = "needs-cmdline"
 
@@ -19,6 +20,7 @@ M.EXPLAIN = {
     [M.OK]            = "tracked",
     [M.NO_CLASS]      = "window has no class",
     [M.IGNORED]       = "class matches ignore_classes",
+    [M.IGNORED_FLOAT] = "window is floating, and ignore_floating is on",
     [M.IGNORED_TAG]   = "window tag matches ignore_tags",
     [M.NEEDS_CMDLINE] = "class is in require_cmdline but has no tag or distinguishing cmdline",
 }
@@ -77,6 +79,11 @@ function M.decide(w, windows, cfg)
     end
     if Config.matches(class, cfg.ignore_classes) then
         return false, M.IGNORED
+    end
+    -- Before anything is fingerprinted: a floating window is usually a dialog, and
+    -- dialogs belong where the focus is rather than where one last appeared.
+    if cfg.ignore_floating and w and w.floating == true then
+        return false, M.IGNORED_FLOAT
     end
     -- Tags before cmdline: a window the user has classified is classified, and there is
     -- no point fingerprinting something we are about to ignore.

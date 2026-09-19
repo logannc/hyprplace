@@ -118,6 +118,7 @@ function support.window(t)
         title         = t.title or "",
         pid           = t.pid or 1000,
         active        = t.active == nil and true or t.active,
+        floating      = t.floating == nil and false or t.floating,
         xwayland      = t.xwayland or false,
         workspace     = t.workspace and { id = t.workspace } or nil,
     }
