@@ -725,6 +725,59 @@ do
     eq(Tag.strip(nil), "", "nil renders as empty")
 end
 
+-- --------------------------------------------------------------------- ignore_tags
+
+group("policy.tags_of")
+do
+    eq(#Policy.tags_of(nil), 0, "no window")
+    eq(#Policy.tags_of({}), 0, "no tags")
+    eq(#Policy.tags_of({ tags = "solo" }), 1, "a bare string is one tag")
+    eq(Policy.tags_of({ tags = "solo" })[1], "solo", "and is returned as given")
+
+    -- Hyprland marks a rule-applied tag dynamic by storing it with a trailing star, so
+    -- `tag = "+floating-window"` in a window rule arrives here as `floating-window*`.
+    eq(Policy.tags_of({ tags = { "floating-window*" } })[1], "floating-window",
+        "the dynamic marker is stripped, as Hyprland's own isTagged does")
+    eq(Policy.tags_of({ tags = { "manual" } })[1], "manual", "a static tag is unchanged")
+
+    local many = Policy.tags_of({ tags = { "a*", "b", "", 7 } })
+    eq(#many, 2, "empty and non-string entries are dropped")
+    eq(many[1] .. many[2], "ab", "the rest survive in order")
+end
+
+group("ignore_tags excludes a window whatever its class")
+do
+    local cfg = Config.build({ ignore_tags = { "^floating%-window$" } })
+
+    -- The case this exists for: a password manager's unlock dialog and its main
+    -- window share a class, so ignore_classes can only take both or neither -- but
+    -- the user's rules already tag the app, and a tag is what distinguishes it.
+    local dialog = support.window({ class = "myvault", address = "0xa", workspace = 3 })
+    dialog.tags = { "floating-window*" }
+    local tracked, reason = Policy.decide(dialog, { dialog }, cfg)
+    ok(not tracked, "a tagged window is not tracked")
+    eq(reason, Policy.IGNORED_TAG, "and says which rule excluded it")
+    ok(Policy.EXPLAIN[reason]:find("ignore_tags", 1, true) ~= nil, "readably")
+
+    local plain = support.window({ class = "myvault", address = "0xb", workspace = 3 })
+    ok(Policy.decide(plain, { plain }, cfg), "an untagged window of the same class is")
+
+    local other = support.window({ class = "kitty", address = "0xc", workspace = 3 })
+    other.tags = { "something-else*" }
+    ok(Policy.decide(other, { other }, cfg), "a tag that does not match does not exclude")
+
+    eq(Placement.decide(dialog, { dialog }, DB.empty(), cfg).outcome, "skip",
+        "so it is never placed")
+
+    -- Nor learned from: the DB filling with dialogs is how this started.
+    local w = support.window({ class = "myvault", address = "0xd", workspace = 3 })
+    w.tags = { "floating-window*" }
+    local hp, h = fresh({ w }, { ignore_tags = { "^floating%-window$" } })
+    h.flush_timers()
+    h.handlers["window.close"](w)
+    eq(next(hp.state().entries), nil, "closing a tagged window records nothing")
+end
+
 -- ------------------------------------------------------------------ the plugin's log
 
 group("identity.render")

@@ -12,14 +12,41 @@ local M = {}
 M.OK            = "ok"
 M.NO_CLASS      = "no-class"
 M.IGNORED       = "ignored-class"
+M.IGNORED_TAG   = "ignored-tag"
 M.NEEDS_CMDLINE = "needs-cmdline"
 
 M.EXPLAIN = {
     [M.OK]            = "tracked",
     [M.NO_CLASS]      = "window has no class",
     [M.IGNORED]       = "class matches ignore_classes",
+    [M.IGNORED_TAG]   = "window tag matches ignore_tags",
     [M.NEEDS_CMDLINE] = "class is in require_cmdline but has no tag or distinguishing cmdline",
 }
+
+--- A window's Hyprland tags, normalized for matching.
+---
+--- Tags applied by a window rule are stored with a `*` suffix to mark them dynamic, so
+--- `tag = "+floating-window"` in the config becomes `floating-window*` on the window.
+--- Hyprland's own CTagKeeper::isTagged treats the two as the same tag; so do we, or a
+--- pattern written to match what the user put in their rules would never fire.
+---@param w table|nil
+---@return string[]
+function M.tags_of(w)
+    local tags = w and w.tags
+    if type(tags) == "string" then
+        tags = { tags }
+    end
+    if type(tags) ~= "table" then
+        return {}
+    end
+    local out = {}
+    for _, tag in ipairs(tags) do
+        if type(tag) == "string" and tag ~= "" then
+            out[#out + 1] = (tag:gsub("%*$", ""))
+        end
+    end
+    return out
+end
 
 --- The class to fingerprint by, preferring the live class over the initial one.
 ---@param w table|nil
@@ -50,6 +77,13 @@ function M.decide(w, windows, cfg)
     end
     if Config.matches(class, cfg.ignore_classes) then
         return false, M.IGNORED
+    end
+    -- Tags before cmdline: a window the user has classified is classified, and there is
+    -- no point fingerprinting something we are about to ignore.
+    for _, tag in ipairs(M.tags_of(w)) do
+        if Config.matches(tag, cfg.ignore_tags) then
+            return false, M.IGNORED_TAG
+        end
     end
     if Config.matches(class, cfg.require_cmdline)
         and not Identity.has_specific_identity(w, windows, cfg) then

@@ -37,6 +37,23 @@ function M.defaults()
             "^hyprland%-run$",
         },
 
+        -- Lua patterns matched against each of a window's Hyprland tags, lowercased.
+        -- A window carrying a matching tag is never remembered and never placed.
+        --
+        -- More useful than ignore_classes where an app's transient dialogs share a
+        -- class with its main window -- a password manager's unlock prompt carries the
+        -- same class as its main window, so excluding by class excludes both. If your
+        -- config already tags such apps, say with
+        --
+        --   hl.window_rule({ match = { class = "^myvault$" }, tag = "+floating-window" })
+        --
+        -- then `ignore_tags = { "^floating%-window$" }` excludes every app you have
+        -- classified that way, and keeps doing so as you tag more.
+        --
+        -- A trailing `*` -- which Hyprland adds to mark a rule-applied tag -- is
+        -- stripped before matching, so patterns match what you wrote in your rules.
+        ignore_tags = {},
+
         -- Lua patterns matched against class:lower(). For these classes, only windows
         -- with a distinguishing cmdline are remembered or placed -- a bare `kitty` is a
         -- fresh shell whose state is gone, but `kitty btop` is a persistent thing.
