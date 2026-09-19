@@ -395,7 +395,12 @@ do
     ok(h.handlers["window.open_early"], "subscribes to window.open_early")
     ok(h.handlers["window.move_to_workspace"], "subscribes to window.move_to_workspace")
     ok(h.handlers["window.close"], "subscribes to window.close")
-    ok(h.handlers["monitor.added"], "subscribes to monitor.added")
+    -- Deliberately NOT subscribed. A hotplug migrates whole workspaces between
+    -- monitors; windows keep the workspace they are on, so nothing hyprplace records
+    -- changes and there is no window.move_to_workspace to mislearn from. A freeze here
+    -- guarded against nothing and only collided with the startup one.
+    eq(h.handlers["monitor.added"], nil, "does not subscribe to monitor.added")
+    eq(h.handlers["monitor.removed"], nil, "nor to monitor.removed")
 end
 
 group("placement dispatch")
@@ -488,16 +493,15 @@ do
     h2.handlers["window.move_to_workspace"](u, { id = 7 })
     eq(hp2.state().entries["discord"], nil, "an unfocused window's move is not learned")
 
-    -- Monitor hotplug reflows whole workspaces; a KVM swap must not rewrite the db.
-    local m = support.window({ class = "signal", address = "0xc", workspace = 3 })
-    local hp3, h3 = fresh({ m })
+    -- A mass move carries focus for at most one of the windows it touches, which is
+    -- what separates hyprsplit's swap_monitors from a user dragging a window.
+    local a = support.window({ class = "signal", address = "0xc", workspace = 3 })
+    local b = support.window({ class = "signal", address = "0xd", workspace = 3,
+        active = false })
+    local hp3, h3 = fresh({ a, b })
     h3.flush_timers()   -- clear the startup freeze
-    h3.handlers["monitor.added"]()
-    h3.handlers["window.move_to_workspace"](m, { id = 7 })
-    eq(hp3.state().entries["signal"], nil, "moves during monitor settling are ignored")
-    h3.flush_timers()
-    h3.handlers["window.move_to_workspace"](m, { id = 7 })
-    eq(hp3.state().entries["signal"].workspaces[1], 7, "learning resumes after settling")
+    h3.handlers["window.move_to_workspace"](b, { id = 7 })
+    eq(hp3.state().entries["signal"], nil, "the unfocused half of a mass move is ignored")
 end
 
 group("multi-window apps record their whole distribution")
@@ -723,6 +727,64 @@ do
     eq(Tag.strip("Inbox"), "Inbox", "an untagged title is unchanged")
     eq(Tag.strip("[has space] x"), "[has space] x", "a non-tag prefix is left alone")
     eq(Tag.strip(nil), "", "nil renders as empty")
+end
+
+-- ------------------------------------------------------------- overlapping freezes
+
+group("a shorter freeze cannot cut a longer one short")
+do
+    -- The only freeze left is the one setup() starts, so overlaps come from reloading
+    -- twice in quick succession: `hyprctl reload` while the previous freeze is running.
+    local w = support.window({ class = "kitty", address = "0xa", workspace = 3 })
+    local hp, h = fresh({ w }, { startup_settle_ms = 8000 })
+    ok(hp._settling, "setup starts frozen")
+
+    local timers = #h.timers
+    hp.setup({ startup_settle_ms = 8000,
+        db_path = tmpfile(), cache_path = tmpfile(), log_path = tmpfile() })
+    -- Equal deadlines: the running freeze already covers the new one, so it needs no
+    -- timer of its own -- and must not get one that could thaw the first early.
+    eq(#h.timers, timers, "a reload of equal length reuses the running freeze")
+    ok(hp._settling, "and the freeze holds")
+
+    h.flush_timers()
+    ok(not hp._settling, "thawing when it expires")
+end
+
+group("a longer freeze started inside a shorter one wins")
+do
+    local w = support.window({ class = "kitty", address = "0xa", workspace = 3 })
+    local hp, h = fresh({ w }, { startup_settle_ms = 2000 })
+    local short_timer = h.timers[#h.timers]
+
+    hp.setup({ startup_settle_ms = 8000,
+        db_path = tmpfile(), cache_path = tmpfile(), log_path = tmpfile() })
+    ok(hp._settling, "the second, longer freeze is running")
+
+    short_timer.cb()
+    ok(hp._settling, "the superseded timer does not thaw it")
+
+    h.flush_timers()
+    ok(not hp._settling, "its own timer does")
+end
+
+group("freezing actually stops learning")
+do
+    -- The point of all of the above, stated as behaviour rather than bookkeeping.
+    local w = support.window({ class = "kitty", address = "0xa", workspace = 3 })
+    local hp, h = fresh({ w }, { startup_settle_ms = 2000 })
+    local short_timer = h.timers[#h.timers]
+
+    hp.setup({ startup_settle_ms = 8000,
+        db_path = tmpfile(), cache_path = tmpfile(), log_path = tmpfile() })
+    short_timer.cb()
+
+    h.handlers["window.move_to_workspace"](w, { id = 9 })
+    eq(next(hp.state().entries), nil, "a move during an overlapping freeze is not learned")
+
+    h.flush_timers()
+    h.handlers["window.move_to_workspace"](w, { id = 9 })
+    ok(hp.state().entries["kitty"] ~= nil, "and is learned once thawed")
 end
 
 -- ------------------------------------------------------------------ ignore_floating

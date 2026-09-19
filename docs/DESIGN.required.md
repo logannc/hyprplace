@@ -119,20 +119,29 @@ last window of an app would record an empty distribution and forget it entirely.
 
 - Our own placement dispatch (guard flag).
 - hyprsplit's `swap_monitors`, which mass-moves every window on two workspaces.
-- The workspace reflow triggered by `monitor.added` / `monitor.removed` — the KVM fires
-  this on every machine swap, and learning from it would rewrite the entire database.
 
 Working definition: a single focused window, moved on its own, while learning is not
 frozen.
 
-Learning is frozen -- placement is not -- during three periods:
+Learning is frozen -- placement is not -- during two periods:
 
 - **Session start and config reload.** `setup()` runs during config load, which happens
   both at boot and on every `hyprctl reload`. In that window the compositor, hyprsplit's
   workspace reflow, and autostart all move windows around; none of it is user intent.
   Freezing from `setup()` rather than from the `hyprland.start` event avoids depending on
-  handler ordering against hyprsplit.
-- **Monitor hotplug**, for `monitor_settle_ms` after `monitor.added`/`removed`.
+  handler ordering against hyprsplit. Freezes can overlap -- two reloads in quick
+  succession -- and the later, longer one must win; otherwise the first timer to fire
+  ends a freeze it does not own, and two overlapping freezes protect for less time than
+  either alone.
+
+> **Monitor hotplug is deliberately not a trigger**, though an earlier version froze on
+> `monitor.added`/`removed`. A hotplug migrates whole *workspaces* between monitors;
+> windows keep the workspace they are on. Since hyprplace records window → workspace,
+> nothing it stores changes and no `window.move_to_workspace` is emitted to mislearn
+> from — verified against both hyprsplit, whose monitor handlers dispatch
+> `workspace.move` and never `window.move`, and this machine's own hotplug module. The
+> freeze guarded nothing and collided with the startup one. The real mass-move case,
+> `swap_monitors`, is a keybind the user invokes and is caught by the focus test above.
 - **Shutdown, permanently.** This one is the most dangerous: teardown closes *every*
   window, and monitors are removed first, so workspaces reflow and windows pile onto
   whatever is left. Recording that would rewrite the entire DB with the collapsing

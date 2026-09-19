@@ -165,11 +165,6 @@ return {
     -- defer_timeout_ms. The check only runs while something is actually waiting.
     defer_poll_ms = 250,
 
-    -- Milliseconds after a monitor is added or removed during which moves are not
-    -- learned from. A KVM swap or a hotplug reflows whole workspaces at once; that is
-    -- the compositor rearranging things, not you deciding where a window belongs.
-    monitor_settle_ms = 2000,
-
     -- Milliseconds after the config loads during which moves are not learned from.
     --
     -- At session start the compositor, your workspace plugin and everything in

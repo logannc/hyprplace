@@ -120,10 +120,6 @@ function M.defaults()
         -- actually pending.
         defer_poll_ms = 250,
 
-        -- Milliseconds after a monitor event during which moves are not learned from.
-        -- A KVM swap or hotplug reflows whole workspaces; that is not user intent.
-        monitor_settle_ms = 2000,
-
         -- Milliseconds after the config loads during which moves are not learned from.
         -- At session start the compositor, hyprsplit and autostart all move windows
         -- around before anything settles; none of it is user intent. This also covers
