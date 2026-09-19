@@ -122,6 +122,32 @@ hyprctl clients -j | jq -r '.[] | select(.class | test("firefox")) | .title'
 - Startup is O(windows²) session reads. At realistic window counts this is nothing, and
   it buys the collision guarantee above.
 
+## Toolbar-less "webapp" windows are not tagged
+
+Add-ons that open a site as a chrome-less window -- [new-window-without-toolbar]
+and similar -- do it by creating a **popup-type** window. That is *how* the toolbar
+goes away. `ensureTag` declines anything where `win.type !== "normal"`, so such a
+window never gets a tag, and hyprplace falls back to keying it by class.
+
+This is the design working, not a gap in it: the rule was written for transient popups
+-- print previews, OAuth flows, picture-in-picture -- which are not worth an identity
+and are not restored anyway. A popup kept open permanently as a webapp is a case that
+reasoning did not cover, and it lands on the wrong side of the line.
+
+It usually does not matter. One such window means one untagged Firefox window, which
+keys cleanly as `firefox` and gets its own workspace like any other single-window app.
+
+**What to watch for:** that class key means *any* untagged Firefox window. With a webapp
+window teaching hyprplace that `firefox` lives on workspace 32, a genuine popup -- an
+auth flow, say -- is also untagged and would be placed there too. `ignore_floating`
+catches it if such popups float. If one ever teleports somewhere strange, this is why.
+
+Tagging popups too is a one-condition change in `ensureTag`. It is deliberately not
+made: every transient popup would then take a fresh random tag and leave a database
+entry behind to expire on the TTL, which is a real cost for a rare case.
+
+[new-window-without-toolbar]: https://addons.mozilla.org/en-US/firefox/addon/new-window-without-toolbar/
+
 ## Data collection: none
 
 `data_collection_permissions: { required: ["none"] }` in the manifest. Mozilla requires

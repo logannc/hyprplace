@@ -83,6 +83,14 @@ must strip the marker or patterns written against a user's rules will never fire
 `LuaWindow.cpp:135` and `HyprCtl.cpp:345`, both reading `m_tagKeeper.getTags()`.)* So the
 plugin and the CLI tools cannot disagree about a window's tags.
 
+## Firefox
+
+**A toolbar-less "webapp" window is a popup, and so is untagged.** *(Live.)* Add-ons
+that open a site without browser chrome create a window with `type: "popup"`, which is
+how the chrome goes away. The hypr-tags extension only tags `type === "normal"`, so such
+a window falls back to hyprplace's class tier. See `extension/README.md`; it is a
+deliberate rule meeting a case it was not written for, not a bug.
+
 ## hyprsplit
 
 **Monitor hotplug does not move windows between workspaces.** *(Source: the installed
