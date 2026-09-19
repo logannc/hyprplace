@@ -18,7 +18,7 @@ M.EXPLAIN = {
     [M.OK]            = "tracked",
     [M.NO_CLASS]      = "window has no class",
     [M.IGNORED]       = "class matches ignore_classes",
-    [M.NEEDS_CMDLINE] = "class is in require_cmdline but has no distinguishing cmdline",
+    [M.NEEDS_CMDLINE] = "class is in require_cmdline but has no tag or distinguishing cmdline",
 }
 
 --- The class to fingerprint by, preferring the live class over the initial one.
@@ -52,7 +52,7 @@ function M.decide(w, windows, cfg)
         return false, M.IGNORED
     end
     if Config.matches(class, cfg.require_cmdline)
-        and not Identity.has_cmdline_identity(w, windows, cfg) then
+        and not Identity.has_specific_identity(w, windows, cfg) then
         return false, M.NEEDS_CMDLINE
     end
     return true, M.OK

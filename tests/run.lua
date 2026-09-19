@@ -698,6 +698,105 @@ do
     eq(Tag.strip(nil), "", "nil renders as empty")
 end
 
+-- --------------------------------------------------------------- identity: tag tier
+
+group("the tag tier outranks cmdline and class")
+do
+    local cfg = Config.build({})
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return { "/usr/lib/firefox/firefox", "--new-window" } end
+
+    -- Two windows, one process: exactly the case the cmdline tier cannot resolve.
+    local a = support.window({ class = "firefox", address = "0xa", pid = 500,
+        title = "[work] Inbox" })
+    local b = support.window({ class = "firefox", address = "0xb", pid = 500,
+        title = "[play] Reddit" })
+    local windows = { a, b }
+
+    local ka, ta = Identity.key_for(a, windows, cfg)
+    local kb, tb = Identity.key_for(b, windows, cfg)
+    eq(ta, "tag", "a tagged window uses the tag tier")
+    eq(tb, "tag", "so does the other")
+    eq(ka, "firefox\0tag:work", "keyed by class and tag")
+    ok(ka ~= kb, "two windows of one process now have different identities")
+
+    -- The same two windows without tags collapse, which is the problem tier 0 solves.
+    a.title, b.title = "Inbox", "Reddit"
+    eq(Identity.key_for(a, windows, cfg), Identity.key_for(b, windows, cfg),
+        "untagged, they are indistinguishable")
+    eq(select(2, Identity.key_for(a, windows, cfg)), "class", "falling back to class")
+
+    -- A tag outranks a perfectly good cmdline, too.
+    local solo = support.window({ class = "kitty", address = "0xc", pid = 900,
+        title = "[term] btop" })
+    Identity.read_cmdline = function() return { "/usr/bin/kitty", "btop" } end
+    eq(select(2, Identity.key_for(solo, { solo }, cfg)), "tag",
+        "a tag wins over a distinguishing cmdline")
+    solo.title = "btop"
+    eq(select(2, Identity.key_for(solo, { solo }, cfg)), "cmdline",
+        "and without it the cmdline tier still works")
+
+    Identity.read_cmdline = real
+end
+
+group("a tag cannot be confused with a cmdline")
+do
+    local cfg = Config.build({})
+    local real = Identity.read_cmdline
+    -- A binary whose normalized cmdline is exactly what a tag key looks like.
+    Identity.read_cmdline = function() return { "/usr/bin/thing", "tag:work" } end
+
+    local spoof = support.window({ class = "firefox", address = "0xa", pid = 1,
+        title = "no tag here" })
+    local tagged = support.window({ class = "firefox", address = "0xb", pid = 2,
+        title = "[work] x" })
+
+    local spoofed = Identity.key_for(spoof, { spoof }, cfg)
+    local genuine = Identity.key_for(tagged, { tagged }, cfg)
+    eq(spoofed, "firefox\0thing tag:work", "the cmdline keeps its binary name")
+    eq(genuine, "firefox\0tag:work", "so it cannot collide with a tag key")
+    ok(spoofed ~= genuine, "the two identities stay distinct")
+
+    Identity.read_cmdline = real
+end
+
+group("require_cmdline accepts a tag as identity")
+do
+    local cfg = Config.build({ require_cmdline = { "^kitty$" } })
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return { "/usr/bin/kitty" } end
+
+    local bare = support.window({ class = "kitty", address = "0xa", pid = 1, title = "~" })
+    ok(not Policy.decide(bare, { bare }, cfg), "a bare terminal is still excluded")
+
+    -- A tag answers the question require_cmdline is really asking: is this window
+    -- distinguishable from every other window of its class?
+    local tagged = support.window({ class = "kitty", address = "0xb", pid = 2,
+        title = "[logs] ~" })
+    ok(Policy.decide(tagged, { tagged }, cfg), "a tagged one is tracked on its tag alone")
+
+    Identity.read_cmdline = real
+end
+
+group("losing a tag is a different identity, not a lost one")
+do
+    -- Disabling the extension, or a rename: the window simply keys differently, and
+    -- the abandoned entry expires under the TTL. No migration logic needed.
+    local cfg = Config.build({})
+    local real = Identity.read_cmdline
+    Identity.read_cmdline = function() return nil end
+
+    local w = support.window({ class = "firefox", address = "0xa", pid = 1,
+        title = "[work] Inbox" })
+    eq(Identity.key_for(w, { w }, cfg), "firefox\0tag:work", "tagged")
+    w.title = "[home] Inbox"
+    eq(Identity.key_for(w, { w }, cfg), "firefox\0tag:home", "renamed is a new key")
+    w.title = "Inbox"
+    eq(Identity.key_for(w, { w }, cfg), "firefox", "untagged falls back to the class")
+
+    Identity.read_cmdline = real
+end
+
 -- ------------------------------------------------------------------- deferral (pure)
 
 group("placement defers an unidentifiable window")
@@ -705,6 +804,7 @@ do
     local cfg = Config.build({ defer_classes = { "^firefox$" }, defer_timeout_ms = 3000 })
     local state = { version = 1, entries = {} }
     DB.observe(state, "firefox", { 3 }, os.time())
+    DB.observe(state, "firefox\0tag:work", { 5 }, os.time())
 
     local untagged = support.window({ class = "firefox", address = "0xa", workspace = 9 })
     local v = Placement.decide(untagged, { untagged }, state, cfg)
@@ -714,10 +814,11 @@ do
 
     local tagged = support.window({ class = "firefox", address = "0xb", workspace = 9,
         title = "[work] Inbox" })
-    eq(Placement.decide(tagged, { tagged }, state, cfg).outcome, "move",
-        "a tagged firefox window decides immediately")
-    eq(Placement.decide(tagged, { tagged }, state, cfg).tag, "work",
-        "and the verdict carries the tag")
+    local tv = Placement.decide(tagged, { tagged }, state, cfg)
+    eq(tv.outcome, "move", "a tagged firefox window decides immediately")
+    eq(tv.tag, "work", "and the verdict carries the tag")
+    eq(tv.target, 5, "placed by its own tag, not by what the class remembers")
+    eq(tv.key, "firefox\0tag:work", "on the tag key")
 
     local kitty = support.window({ class = "kitty", address = "0xc", workspace = 9 })
     ok(Placement.decide(kitty, { kitty }, state, cfg).outcome ~= "defer",
@@ -778,6 +879,7 @@ end
 group("deferral acts as soon as the identity arrives")
 do
     local w, hp, h = deferring()
+    DB.observe(hp.state(), "firefox\0tag:work", { 5 }, os.time())
     h.handlers["window.open_early"](w)
     eq(#h.dispatched, 0, "waiting")
 
@@ -786,7 +888,8 @@ do
     h.handlers["window.title"](w)
 
     eq(#h.dispatched, 1, "placed immediately, without waiting for the deadline")
-    eq(h.dispatched[1].args.workspace, 3, "on the remembered workspace")
+    -- 5, not the 3 the bare `firefox` key remembers: waiting is what bought the tag.
+    eq(h.dispatched[1].args.workspace, 5, "on the workspace its own tag remembers")
     eq(h.handlers["window.title"], nil, "the subscription is released")
 
     -- The deadline must not then fire a second placement.
@@ -888,6 +991,7 @@ do
     h.handlers["window.open_early"](b)
     eq(#h.dispatched, 0, "both are waiting")
 
+    DB.observe(hp.state(), "firefox\0tag:one", { 21 }, os.time())
     a.title = "[one] x"
     h.handlers["window.title"](a)
     eq(#h.dispatched, 1, "resolving one does not resolve the other")
@@ -897,10 +1001,11 @@ do
     eq(#h.dispatched, 2, "the second is placed at its deadline")
     eq(h.handlers["window.title"], nil, "only then is the subscription released")
 
-    -- Distinct slots: the first took 3, so the second takes 4.
-    local got = { h.dispatched[1].args.workspace, h.dispatched[2].args.workspace }
-    ok((got[1] == 3 and got[2] == 4) or (got[1] == 4 and got[2] == 3),
-        "they take different remembered slots")
+    -- The payoff of tier 0: the tagged window goes where *it* belongs, and the
+    -- untagged one falls back to the class key's slots. They are different
+    -- identities, so they no longer compete for the same remembered positions.
+    eq(h.dispatched[1].args.workspace, 21, "the tagged window goes where its tag says")
+    eq(h.dispatched[2].args.workspace, 3, "the untagged one takes a class-key slot")
 end
 
 -- ----------------------------------------------------------------------------- json
@@ -1267,6 +1372,8 @@ group("cli.show_key")
 do
     eq(CLI.show_key("kitty\0kitty btop"), "kitty + kitty btop", "NUL rendered readably")
     eq(CLI.show_key("firefox"), "firefox", "plain key unchanged")
+    eq(CLI.show_key("firefox\0tag:f533cc25"), "firefox + tag:f533cc25",
+        "a tag key reads as well as a cmdline one does")
     eq(CLI.show_key(nil), "(none)", "nil key")
 end
 

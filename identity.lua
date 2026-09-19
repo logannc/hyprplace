@@ -3,13 +3,26 @@
 -- No stable id survives a close (`address` and `stable_id` die with the window, `pid`
 -- dies with the reboot), so the key is a fingerprint, layered most-specific first:
 --
+--   0. class + published tag -- an identity the application itself declares.
 --   1. class + normalized cmdline -- only when the pid maps to exactly one window,
 --      because Firefox and Electron serve many windows from one process.
 --   2. class alone.
 --
+-- Tier 0 works where tier 1 structurally cannot. Nine Firefox windows share one pid, so
+-- no amount of cmdline parsing can tell them apart; a tag is per window by
+-- construction. It is also the only tier that is not a heuristic -- the others infer
+-- identity from things the app set for its own reasons, while a tag is published
+-- deliberately for this. See docs/FIREFOX-TAGS.md.
+--
 -- See docs/DESIGN.required.md.
 
+local Tag = require("hyprplace.tag")
+
 local M = {}
+
+--- Marks the tag portion of a key, so a tag can never be confused with a cmdline that
+--- happens to look like one. Renders readably in the tools: `firefox + tag:f533cc25`.
+M.TAG_PREFIX = "tag:"
 
 -- Command wrappers that carry no identity: strip them to reach the real argv.
 local WRAPPERS = {
@@ -145,6 +158,13 @@ function M.key_for(w, windows, cfg)
         return nil, "none"
     end
 
+    -- Tier 0, before anything is inferred. Also spares the /proc read below, which is
+    -- blocking I/O in the compositor's hot path.
+    local tag = Tag.of(w.title)
+    if tag then
+        return class .. "\0" .. M.TAG_PREFIX .. tag, "tag"
+    end
+
     if w.pid and M.pid_window_count(windows, w.pid) == 1 then
         local cmd = M.normalize_cmdline(M.read_cmdline(w.pid), cfg)
         if cmd then
@@ -155,14 +175,22 @@ function M.key_for(w, windows, cfg)
     return class, "class"
 end
 
---- Does this window have a distinguishing cmdline? Used by `require_cmdline`.
+--- Does this window have an identity of its own, beyond its class?
+---
+--- Used by `require_cmdline`, whose name predates tags: the question it is really
+--- asking is "is this window distinguishable from every other window of its class", and
+--- a tag answers that better than a cmdline does. A tagged terminal is a specific
+--- terminal even if it was launched bare.
 ---@param w table
 ---@param windows table[]
 ---@param cfg table|nil
 ---@return boolean
-function M.has_cmdline_identity(w, windows, cfg)
+function M.has_specific_identity(w, windows, cfg)
     local _, tier = M.key_for(w, windows, cfg)
-    return tier == "cmdline"
+    return tier == "tag" or tier == "cmdline"
 end
+
+-- Previous name, kept so nothing outside this module breaks on the rename.
+M.has_cmdline_identity = M.has_specific_identity
 
 return M

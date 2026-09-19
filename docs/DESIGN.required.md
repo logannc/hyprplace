@@ -72,10 +72,23 @@ hyprplace is a Lua module loaded in-process by the compositor:
 No stable cross-session id exists. `address` and `stable_id` die on close; `pid` dies on
 reboot. The key is layered, most specific first:
 
+0. `class` + a tag the application publishes in its title, marked `tag:` in the key.
+   Only Firefox has one today, via the extension in `extension/`.
 1. `class` + normalized `/proc/<pid>/cmdline` — used only when the pid maps to exactly one
    window. Wrapper prefixes (`uwsm app --`) are stripped.
 2. `class` + instance ordinal — for multi-window apps sharing one pid.
 3. `class` alone — last resort.
+
+Tier 0 is different in kind from the rest, not just more specific. Tiers 1–3 *infer*
+identity from things the app set for its own reasons; a tag is published deliberately
+for this purpose. It is also the only tier that works when one process serves many
+windows — nine Firefox windows share a pid, so no cmdline parsing can separate them,
+while a tag is per window by construction. Tagged windows are therefore singular: each
+has its own key and its own single-workspace entry, and the distribution machinery below
+is not needed for them.
+
+A window that loses its tag — the extension disabled, or the tag renamed — simply keys
+differently from then on, and the abandoned entry expires under the TTL. No migration.
 
 For multi-instance apps the record is the **observed distribution**: the full list of
 workspaces occupied by every live window sharing the key, duplicates included. Seven
