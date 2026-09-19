@@ -160,10 +160,10 @@ local function install_plugin()
         local src, dst = ROOT .. "/" .. m, PLUGIN_DIR .. "/" .. m
         if not same(src, dst) then
             changed = changed + 1
-            act("copy " .. m, function() return write(dst, read(src)) end)
+            act("copy " .. src .. " -> " .. dst, function() return write(dst, read(src)) end)
         end
     end
-    act("copy bin/hyprplace", function()
+    act("copy " .. ROOT .. "/bin/hyprplace -> " .. CLI_TARGET, function()
         write(CLI_TARGET, read(ROOT .. "/bin/hyprplace"))
         return os.execute("chmod +x " .. q(CLI_TARGET)) and true or false
     end)
@@ -221,7 +221,9 @@ local function install_config()
     if existing then
         say("kept your config section" .. describe_config(existing))
     end
-    say("backup: " .. backup)
+    if not opts.dry_run then
+        say("backup: " .. backup)
+    end
 end
 
 local function install_bin()
@@ -268,7 +270,9 @@ local function uninstall_config()
     if existing and #existing > 0 then
         say("your settings went with it; they are in the backup")
     end
-    say("backup: " .. backup)
+    if not opts.dry_run then
+        say("backup: " .. backup)
+    end
 end
 
 local function uninstall_plugin()
@@ -369,6 +373,10 @@ local function status()
         say("config cache present (the CLI reports the running config)")
     else
         say("no config cache -- the plugin has not loaded; the CLI will use defaults")
+    end
+    local log = opts.state_dir .. "/hyprplace.log"
+    if exists(log) then
+        say("log: " .. log)
     end
     io.write("\n")
 end
