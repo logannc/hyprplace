@@ -35,6 +35,11 @@ why hyprplace keeps its own log file rather than relying on `print`.
 needs. `window.class` fires earlier still, but with empty `initial_class`/`title` and a
 nil workspace, so it is only useful as an XWayland fallback.
 
+**XWayland windows carry a `class` at `window.open_early`.** *(Live.)* Observed via
+Steam, which is XWayland: its placement verdict is logged from the `open_early` handler,
+which it only reaches past the no-class check. The design allowed for needing a fallback
+to the `window.class` event for XWayland; that fallback is not needed.
+
 **`floating` is populated at `window.open_early`.** *(Live.)* A floating dialog is
 identifiable as such at open, before any placement decision is made — so
 `ignore_floating` works on the placement path and not merely on the learning path. Worth

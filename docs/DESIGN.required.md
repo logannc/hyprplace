@@ -206,9 +206,10 @@ compositor or the config.
 - **Reload wipes all in-memory state.** `hyprctl reload` destroys and recreates the Lua
   VM (measured). The DB must be loaded from disk at module load; nothing may be cached
   only in `_G` across a reload.
-- **XWayland class timing.** `class` may be empty at `window.open_early` for XWayland
-  windows, requiring a deferral to `window.class`. *(Still unverified — XWayland is
-  disabled in the probe config to avoid stray coredumps.)*
+- **XWayland class timing.** ~~`class` may be empty at `window.open_early` for XWayland
+  windows, requiring a deferral to `window.class`.~~ *Resolved: XWayland windows do carry
+  a class at `open_early` (observed live via Steam). No fallback is needed. See
+  [OBSERVED.md](OBSERVED.md).*
 
 ## Version skew (v0.56.2 → upstream main)
 

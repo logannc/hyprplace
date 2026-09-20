@@ -5,31 +5,37 @@ windows back there when they open.
 
 ## Status
 
-**Implemented and unit-tested; never yet run inside a compositor.** That is the single
-most important fact here: 262 tests pass, and none of them prove the plugin works,
-because none of them involve a real compositor.
+**Installed and running on the author's live session.** The core acceptance criteria have
+been verified against a real compositor, not just in tests: AC-1 (close an app, reopen
+it, it returns), AC-2 (placement never steals focus), AC-3 (an empty database is
+indistinguishable from not being installed), AC-6 (errors are contained *and* visible).
+The Firefox tag path works end to end through a signed extension.
 
 | | |
 |---|---|
 | Plugin | `init.lua` + `config` `db` `identity` `placement` `policy` `learn` `tag` `cache` |
-| Tools | `bin/hyprplace` — `fingerprint` `plan` `db` `diff` `prune` `watch` |
-| Extension | `extension/` — hypr-tags, unsigned, dev only. See `extension/README.md` |
+| Tools | `bin/hyprplace` — `fingerprint` `plan` `db` `diff` `prune` `forget` `watch` |
+| Extension | `extension/` — hypr-tags, signed and installed. See `extension/README.md` |
 | Installer | `./install.lua install \| uninstall \| status` |
 | Test harness | `./harness/compositor.sh start\|stop\|cmd\|repl` |
-| Tests | `make test` (262, no compositor needed); `make check` parses only |
+| Tests | `make test` (555, no compositor needed); `make check` parses only |
+| Public docs | `README.md` is user-facing; this file is for agents working in the repo |
 
-**Next step is MVP testing**: install it, reload Hyprland, then observe with
-`hyprplace watch` and `hyprplace diff` rather than trusting it. Three assumptions are
-unverified and a real session will settle all three immediately — they are listed under
-Constraints and risks in DESIGN.required.md:
+**Not yet verified: a full reboot.** That is the one remaining gap, and it is the
+dangerous one — teardown closes every window after monitors are removed, so if
+`hyprland.shutdown` does not beat the close storm the database is rewritten with the
+collapsing layout and the evidence is destroyed with it. Copy `db.lua` aside before
+logging out and diff afterwards rather than trusting it. The reboot also settles whether
+`w.active == false` really filters hyprsplit's mass moves.
 
-- whether `w.active == false` really does filter hyprsplit's mass moves,
-- whether `hyprland.shutdown` fires before the window-close storm,
-- whether XWayland windows have a `class` at `window.open_early`.
+Two of the three original unknowns are settled and recorded in
+[docs/OBSERVED.md](docs/OBSERVED.md): XWayland windows **do** carry a `class` at
+`window.open_early` (observed via Steam), and `floating` is populated there too.
 
-**Pending decision:** `require_cmdline = { "^kitty$" }` would stop bare terminals being
-tracked while keeping `kitty btop`. One line; deliberately not enabled, because the
-defaults are the user's call (see FUTURE.md).
+**Publishing is in progress** — MIT licence, README, and CI are in place. Still to do: a
+redaction audit over every revision (secrets, identifiers, behavioural profile, fixtures,
+and revision descriptions), then the push itself. Nothing has been pushed anywhere yet,
+which is the only moment rewriting history is cheap.
 
 ## Required reading
 

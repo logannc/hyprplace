@@ -19,12 +19,12 @@ tag work.
 
 | # | Phase | Notes |
 |---|---|---|
-| 0 | Restate AC-4; record the deferral decision | Done. The old wording forbade the feature |
-| 1 | Deferred-decision machinery | The bottleneck: tags and title sampling both need it |
-| 2 | The extension, in dev mode | `extension/` here; `web-ext run`, unsigned, throwaway id |
-| 3 | Tag identity tier | Tier 0, above class + cmdline |
-| 4 | Live MVP testing | The full thing, including the three unverified assumptions |
-| 5 | Distribution | AMO, signing, `policies.json`, root. Separately invoked |
+| 0 | Restate AC-4; record the deferral decision | **Done** |
+| 1 | Deferred-decision machinery | **Done.** The bottleneck: tags and title sampling both needed it |
+| 2 | The extension, in dev mode | **Done.** `extension/`, via `web-ext run` |
+| 3 | Tag identity tier | **Done.** Tier 0, above class + cmdline |
+| 4 | Live MVP testing | **Mostly done.** AC-1/2/3/6 verified live; a reboot is the remaining gap |
+| 5 | Distribution | **Partly done.** Signed and unlisted on AMO. The `policies.json` root path was dropped: installing on your own machine needs neither |
 
 **Not measured, configured.** An earlier plan added a title-timing instrument to
 `hyprplace watch` and measured real Firefox restarts to derive the deferral timeout.
