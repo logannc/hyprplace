@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lua:
+    name: parse and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The plugin itself runs inside the Lua the compositor embeds (5.5), which a CI
+      # runner cannot reproduce. The suite is pure logic with no `hl` dependency -- it
+      # drives the event handlers through a fake compositor -- so the interpreter the
+      # runner provides is enough to catch regressions.
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+
+      - name: Parse every Lua file
+        run: make check LUA=lua5.4
+
+      - name: Unit tests
+        run: make test LUA=lua5.4
+
+  extension:
+    name: extension lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Signing is deliberately not automated. A version string can be signed exactly
+      # once, so a workflow that signs on push is a workflow that fails permanently the
+      # first time anything goes wrong. Linting is the half worth running every time.
+      - name: web-ext lint
+        run: npx --yes web-ext lint -s extension
